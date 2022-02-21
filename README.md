@@ -33,9 +33,9 @@ See notes on example config files for example commands to run the pipelines.
 
 To install datteRo use the following command in R.
 
----
+````
 install.packages("datteRo_1.2.1.tar.gz")
----
+````
 
 This package contains functions needed for the processing of data output from the snakemake pipelines.
 
