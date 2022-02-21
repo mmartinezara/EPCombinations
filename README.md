@@ -12,7 +12,7 @@ Structure:
 * DownstreamPipeline contains a snakemake pipeline used to preprocess Downstream assay sequencing data.
 * datteRo_1.2.1.tar.gz contains a custom R package developed by Federico Comoglio. The functions contained in this package are needed for processing of data in R scripts.
 * Rproj contains all R scripts used to process intermediate count tables to activities and boost indices, to perform analyses and to generate figures.
-* data contains intermediate files output from the pipelines, processed activity and boost indices files, data needed for the design of cCRE-P libraries.
+* data contains processed activity and boost indices files, data needed for the design of cCRE-P libraries and external processed data needed for analyses.
 
 
 ## Snakemake pipelines
