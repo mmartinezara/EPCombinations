@@ -1,0 +1,90 @@
+# Validate params
+
+if not 'genome' in config['dir'].keys():
+    sys.exit('Genome dir must be defined in the dir section of the config file')
+
+if not 'seq_type' in config['metadata'].keys():
+    sys.exit('Sequencing type (single or paired ends) must be defined in the config file')
+
+if config['metadata']['seq_type'] == 'pe' and not 'mate_suffix' in config['metadata'].keys():
+    sys.exit('The param seq_type/mate_suffix must be defined when analysing paired end data')
+
+if not 'bowtie2' in config.keys():
+    config['bowtie2'] = {}
+
+if not 'fastq_dir' in config['dir'].keys():
+    sys.exit('You must define the location of the fastq files.')
+
+if not 'samples' in config['metadata'].keys():
+    sys.exit('You must define the location of the sample metadata containing sample identifiers.')
+
+def get_bowtie2_input():
+    if(seq_type == 'se'):
+        reads = fastq_dir + '/' + '{sample}' + mate_suffix[0] + '.' + ext
+    else:
+        reads = [fastq_dir + '/' + '{sample}' + mate_suffix[0] + '.' + ext, fastq_dir + '/' + '{sample}' + mate_suffix[1] + '.' + ext]
+    return(reads)
+
+# Rule
+rule bowtie2:
+  """
+  Align short reads to reference genome using bowtie2
+  Convert SAM -> BAM and sort BAM using sambamba
+  Output folder: Bowtie2_aln/
+  """
+    input:
+        reads            = get_bowtie2_input(),
+        bt2_index        = bt2_index_prefix + '.1.bt2'
+    output:
+        bam              = os.path.join(res_dir, 'Bowtie2_aln/{sample}_sorted.bam')
+    params:
+        bt2_index_prefix = bt2_index_prefix,
+        options          = config['bowtie2']['other_options'],
+        seq_type         = config['metadata']['seq_type']
+    log:
+        os.path.join(log_dir, 'bowtie2/{sample}.log')
+    conda:
+        os.path.join(conda_env, 'bowtie2.yaml')
+    threads: 12
+    shell:
+        """
+        if [ {params.seq_type} == 'se' ]
+        then
+            nice -n 19 bowtie2 --very-sensitive-local --time --threads {threads}   -x {params.bt2_index_prefix} -U {input.reads} 2> {log} | \
+            sambamba view --nthreads={threads} --sam-input --format=bam --with-header /dev/stdin | \
+            sambamba sort --nthreads={threads} --out={output.bam} /dev/stdin
+        else
+            nice -n 19 bowtie2 --very-sensitive-local --time --threads {threads}  -x {params.bt2_index_prefix} -1 {input.reads[0]} -2 {input.reads[1]} 2> {log} | \
+            sambamba view --nthreads={threads} --sam-input --format=bam --with-header /dev/stdin | \
+            sambamba sort --nthreads={threads} --out={output.bam} /dev/stdin
+        fi
+        """
+
+
+# ===========EPSURE CODE:
+#
+# # Align iPCR PE reads in very sensitive local mode against EP fragment index
+# # Convert SAM -> BAM
+# # Sort BAM
+# rule bowtie2_align:
+#     input:
+#         expand('Bt2index/EPindex.{index}.bt2', index = range(1,5)),
+#         expand('Bt2index/EPindex.rev.{index}.bt2', index = range(1,3)),
+#         r1 = IPCR_DIR + R1,
+#         r2 = IPCR_DIR + R2
+#     output:
+#         bam = 'Bowtie2_aln/{ipcr}_sorted.bam'
+#     params:
+#         bowtie2_index = 'Bt2index/EPindex',
+#         out_dir = 'Bowtie2_aln'
+#     log:
+#         'logs/bowtie2/{ipcr}.log'
+#     conda:
+#         'environment.yaml'
+#     threads: 8
+#     shell:
+#         """
+#         nice -n 19 bowtie2 --very-sensitive-local --time --threads {threads} --no-unal -x {params.bowtie2_index} -1 {input.r1} -2 {input.r2} 2> {log} | \
+#         sambamba view --nthreads={threads} --sam-input --format=bam --with-header /dev/stdin | \
+#         sambamba sort --nthreads={threads} --out={output.bam} /dev/stdin
+#         """

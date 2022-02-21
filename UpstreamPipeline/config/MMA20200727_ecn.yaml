@@ -1,0 +1,27 @@
+###############
+# Global params
+
+  # for records
+  description:        'EP-SuRE ECN data analysis pipeline'
+  dataset:            'ECN runs (pDNA + cDNA), SE sequencing'
+
+  # params
+  metadata:
+    mate_suffix:      '_R1' 
+    input_format:     'fastq.gz'
+
+  dir:
+    fastq_dir:        '/YOURDIR/DAT_EP016_EP017/ecn/Raw'
+    results:          'Results_v3'
+    logs:             'Logs_V3'
+    conda_env:        '/YOURDIR/UpstreamPipeline/envs'
+    snakerules:       '/YOURDIR/UpstreamPipeline/rules'
+
+################
+# Notes:
+# dry run this snakemake pipeline
+#   snakemake -n --snakefile /YOURDIR/UpstreamPipeline/workflows/ecn.wf --configfile /YOURDIR/UpstreamPipeline/config/MMA20200727_ecn.yaml
+
+# run this snakemake pipeline
+#   snakemake --cores 24 --use-conda --snakefile /YOURDIR/UpstreamPipeline/workflows/ecn.wf --configfile /YOURDIR/UpstreamPipeline/config/MMA20200727_ecn.yaml
+

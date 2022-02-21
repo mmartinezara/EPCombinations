@@ -1,0 +1,50 @@
+###############
+# Global params
+
+  # for records
+  description:        'Split design iPCR data analysis pipeline'
+  dataset:            'iPCR runs, PE sequencing, NCS (negative controls libraries)'
+
+  # params
+  genome:
+    fasta_file:       'MMA191210_Klf2NegControlWAdapters.fasta'
+    bt2_index_prefix: 'Bt2index/NegControls_index'
+
+  metadata:
+    samples:          '/YOURDIR/Split/smk_meta/2019_12_09_smk_Split_ipcr.tsv'
+    seq_type:         'pe' # se or pe
+    mate_suffix:      '_R1,_R2' # for PE reads, the mate suffix
+    input_format:     'fastq.gz'
+
+  dir:
+    fastq_dir:        '/YOURDIR/Split/ipcr_NCS/Raw'
+    genome:           '/YOURDIR/data/tad_deconstr_design/negcontrol_klf2/'
+    results:          'Results_V2'
+    logs:             'LogsV2'
+    conda_env:        '/YOURDIR/DownstreamPipeline/envs'
+    snakerules:       '/YOURDIR/DownstreamPipeline/rules'
+###############
+# Optional params
+# used by rules & programs other than defaults
+
+  fastqc:
+    other_options: '--quiet'
+
+  multiqc:
+    other_options: '--force --quiet --ignore *.snakemake'
+
+  bowtie2:
+    other_options: ''
+
+################
+# Notes:
+# To generate metadata file for snakemake run:
+#   cd /DATA/projects/epmatrix/mouse/DAT_EP010_EP013/smk_meta
+#   cut -f1-2 /DATA/projects/epmatrix/metadata/E43_DAT_metadata.txt | grep nanog > tmp.tsv; echo -e "sample.id\tfq.files" | cat - tmp.tsv > 2018_07_05_smk_nanog_ipcr.tsv; rm tmp.tsv
+# the pipeline uses sample.id column
+
+# dry run this snakemake pipeline
+#   snakemake -n --snakefile /home/m.martinez.ara/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/workflows/ipcr.wf --configfile /home/m.martinez.ara/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/runs/MMA20200923_NCS_config_ipcr.yaml
+
+# run this snakemake pipeline
+#   snakemake --cores 24 --use-conda --snakefile /home/m.martinez.ara/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/workflows/ipcr.wf --configfile /home/m.martinez.ara/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/runs/MMA20200923_NCS_config_ipcr.yaml

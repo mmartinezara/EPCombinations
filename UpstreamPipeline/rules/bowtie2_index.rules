@@ -1,0 +1,47 @@
+# Validate parameters
+
+if not "fasta_file" in config["genome"].keys():
+    sys.exit("Fasta file must be defined in the config file")
+
+if not "genome" in config["dir"].keys():
+    sys.exit("Genome dir must be defined in the 'dir' section of the config file")
+
+# Rule
+rule bowtie2_index:
+  """
+  Generate bowtie2 index
+  Should run only once
+  Output file is used to test whether the index already exists before aligning
+  """
+    input:
+        os.path.join(genome_dir, genome_fasta)
+    output:
+        bt2_index_prefix + '.1.bt2'
+    params:
+        prefix = bt2_index_prefix
+    log:
+        os.path.join(log_dir, 'bt2_index.log')
+    conda:
+        os.path.join(conda_env, 'bowtie2.yaml')
+    threads: 12
+    shell:
+        'bowtie2-build -f --quiet --threads {threads} {input} {params.prefix} &> {log}'
+
+#
+# ===========EPSURE CODE:
+#
+# # Generate bowtie2 index from in silico PCR for alignment of iPCR data
+# rule bowtie2_index:
+#     input:
+#         GENOME
+#     output:
+#         expand('Bt2index/EPindex.{index}.bt2', index = range(1,5)),
+#         expand('Bt2index/EPindex.rev.{index}.bt2', index = range(1,3)),
+#     params:
+#         prefix = 'Bt2index/EPindex'
+#     conda:
+#       'environment.yaml'
+#     threads: 8
+#     shell:
+#         'bowtie2-build -f --quiet --threads {threads} {input} {params.prefix}'
+#

@@ -1,0 +1,113 @@
+"""
+iPCR data analysis mapping workflow
+
+This workflow:
+
+ - Performs QC of raw reads with fastqc
+ - Builds bowtie2 index from fasta file containing the forward sequence of cloned fragments
+ - Map iPCR reads with bowtie2
+
+The parameters are specified in a YAML configuration file.
+
+Usage:
+
+    snakemake --cores 24 --use-conda --snakefile /home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/workflows/ipcr.wf \
+        --configfile /home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/config/config_ipcr.yaml
+
+Author: Federico Comoglio; inspired by SnakeChunks
+(kudos to Claire Rioualen, Jacques van Helden et al.)
+"""
+
+#================================================================#
+# Python Imports
+
+# from snakemake.utils import R
+import os
+import sys
+import datetime
+import re
+import pandas as pd
+from pathlib import Path
+from os.path import join
+
+# include set of python functions for e.g. parsing metadata
+include: '/home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/py/util.py'
+
+#================================================================#
+# Validate parameters
+
+if not (('dir' in config.keys()) and ('fastq_dir' in config['dir'].keys())):
+    sys.exit("The parameter config['dir']['fastq_dir'] should be specified in the config file.")
+
+if not ('fastq_dir' in config['dir'].keys()):
+    sys.exit("The parameter config['dir']['fastq_dir'] should be specified in the config file.")
+else:
+    fastq_dir = config['dir']['fastq_dir']
+
+if not ('results' in config['dir'].keys()):
+    sys.exit("The parameter config['dir']['results'] should be specified in the config file.")
+else:
+    results_dir = config['dir']['results']
+
+#================================================================#
+# Variables & directories
+
+# Genome & annotations
+genome_dir   = config['dir']['genome']
+genome_fasta = os.path.join(genome_dir, config['genome']['fasta_file'])
+
+# Results Directory
+res_dir          = config['dir']['results']
+
+# Log Directory
+log_dir          = config['dir']['logs']
+
+# Enviroment directory
+conda_env          = config['dir']['conda_env']
+
+# Bowtie2 index prefix
+bt2_index_prefix = config['genome']['bt2_index_prefix']
+
+# sequencing type
+seq_type         = config['metadata']['seq_type']
+
+# mate suffix
+mate_suffix      = config['metadata']['mate_suffix'].split(',')
+
+# input file extension
+ext              = config['metadata']['input_format']
+
+# Wilcards (capital)
+# Sample identifiers = raw file name prefix (from metadata file)
+SAMPLE_IDS   = read_table(config['metadata']['samples'])['sample.id']
+SAMPLE_IDS   = SAMPLE_IDS.tolist()
+# prev: strip _mate
+# SAMPLE_IDS   = [sid[:-len(mate_suffix[0])] for sid in SAMPLE_IDS]
+print(SAMPLE_IDS)
+
+#================================================================#
+# Snakemake rules
+
+# define directory containing snakemake rules
+RULES = config['dir']['snakerules']
+
+include: os.path.join(RULES, 'fastqc.rules')
+include: os.path.join(RULES, 'multiqc.rules')
+include: os.path.join(RULES, 'bowtie2_index.rules')
+include: os.path.join(RULES, 'bowtie2_aln.rules')
+include: os.path.join(RULES, 'identify_fragments.rules')
+include: os.path.join(RULES, 'cluster_ipcr_barcodes.rules')
+
+
+#================================================================#
+# Rule all
+
+MULTIQC_OUT  = os.path.join(res_dir, 'FastQC/multiqc.html')
+MERGED       = expand(os.path.join(res_dir, '{sample}_unique_barcodes_frag_id_merged.tsv'), sample = SAMPLE_IDS)
+
+rule all:
+    input:
+        MULTIQC_OUT,
+        MERGED
+    params:
+	shell: "echo Job done `date '+%Y-%m-%d %H:%M'`"

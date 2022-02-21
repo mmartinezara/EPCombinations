@@ -1,0 +1,50 @@
+###############
+# Global params
+
+  # for records
+  description:        'EP-SuRE iPCR data analysis pipeline v3'
+  dataset:            'iPCR runs, Klf2, PE sequencing'
+
+  # params
+  genome:
+    fasta_file:       'fc180419_dat_klf2_sense_ordered.fasta'
+    bt2_index_prefix: 'Bt2index/dat_klf2_index'
+
+  metadata:
+    samples:          '/YOURDIR/DAT_EP010_EP013/smk_meta/2018_07_05_smk_klf2_ipcr.tsv'
+    seq_type:         'pe' # se or pe
+    mate_suffix:      '_R1,_R2' # for PE reads, the mate suffix
+    input_format:     'fastq.gz'                                            # of the raw reads
+
+  dir:
+    fastq_dir:        '/YOURDIR/DAT_EP010_EP013/ipcr/Raw'
+    genome:           '/YOURDIR/data/tad_deconstr_design/designs/sense_fasta_for_bt2'
+    results:          'Results_v3'
+    logs:             'Logs_v3'
+    conda_env:        '/YOURDIR/UpstreamPipeline/envs'
+    snakerules:       '/YOURDIR/UpstreamPipeline/rules'
+
+###############
+# Optional params
+# used by rules & programs other than defaults
+
+  fastqc:
+    other_options: '--quiet'
+
+  multiqc:
+    other_options: '--force --quiet --ignore *.snakemake'
+
+  bowtie2:
+    other_options: ''
+
+################
+# Notes:
+# To generate metadata file for snakemake run:
+#   cd /DATA/projects/epmatrix/mouse/DAT_EP010_EP013/smk_meta
+#   cut -f1-2 /DATA/projects/epmatrix/metadata/E43_DAT_metadata.txt | grep klf2 > tmp.tsv; echo -e "sample.id\tfq.files" | cat - tmp.tsv > 2018_07_05_smk_klf2_ipcr.tsv; rm tmp.tsv
+# the pipeline uses sample.id column
+
+# dry run this snakemake pipeline
+#   snakemake -n --snakefile /YOURDIR/UpstreamPipeline/workflows/ipcr.wf --configfile /YOURDIR/UpstreamPipeline/runs/MMA20200629_dat_klf2_ipcrV3.yaml
+# run this snakemake pipeline
+#   snakemake --cores 24 --use-conda --snakefile /YOURDIR/UpstreamPipeline/workflows/ipcr.wf --configfile /YOURDIR/UpstreamPipeline/runs/MMA20200629_dat_klf2_ipcrV3.yaml

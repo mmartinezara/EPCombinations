@@ -1,0 +1,22 @@
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+'''
+    Title: EP-SuRE analysis pipeline
+    Author: FC@NKI
+    Contributors: ['FC', 'MMA']
+    Date last modified: 2018/02/07
+    Python Version: 3.6.2
+'''
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
+
+include:
+    'Py/config.py'
+
+# Rules -----------------------------------------------------------------------
+
+# rule all input = expected final output of the pipeline (DAG leaves)
+
+rule all:
+    input:
+        'FastQC/multiqc.html',
+         expand('Results/{ipcr}_unique_barcodes_frag_id_merged.tsv', ipcr = IPCR),
+         expand('Results/{ecn}_barcode_counts.tsv', ecn = ECN)

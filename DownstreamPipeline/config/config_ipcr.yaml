@@ -1,0 +1,51 @@
+###############
+# Global params
+
+  # for records
+  description:        'EP-SuRE iPCR data analysis pipeline'
+  dataset:            'iPCR runs, PE sequencing'
+
+  # params
+  genome:
+    fasta_file:       'fc180419_dat_nanog.fasta'
+    bt2_index_prefix: 'Bt2index/dat_nanog_index'
+
+  metadata:
+    samples:          '/DATA/projects/epmatrix/mouse/DAT_EP010_EP013/smk_meta/2018_07_05_smk_nanog_ipcr.tsv'
+    seq_type:         'pe' # se or pe
+    mate_suffix:      '_R1,_R2' # for PE reads, the mate suffix
+    input_format:     'fastq.gz'
+
+  dir:
+    fastq_dir:        '/DATA/projects/epmatrix/mouse/DAT_EP010_EP013/ipcr/Raw'
+    genome:           '/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/designs/used_for_design_and_manually_curated/'
+    results:          'Results'
+    logs:             'Logs'
+    conda_env:        '/home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/envs'
+    snakerules:       '/home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/rules'           
+
+###############
+# Optional params
+# used by rules & programs other than defaults
+
+  fastqc:
+    other_options: '--quiet'
+
+  multiqc:
+    other_options: '--force --quiet --ignore *.snakemake'
+
+  bowtie2:
+    other_options: ''
+
+################
+# Notes:
+# To generate metadata file for snakemake run:
+#   cd /DATA/projects/epmatrix/mouse/DAT_EP010_EP013/smk_meta
+#   cut -f1-2 /DATA/projects/epmatrix/metadata/E43_DAT_metadata.txt | grep nanog > tmp.tsv; echo -e "sample.id\tfq.files" | cat - tmp.tsv > 2018_07_05_smk_nanog_ipcr.tsv; rm tmp.tsv
+# the pipeline uses sample.id column
+
+# dry run this snakemake pipeline
+#   snakemake -n --snakefile /home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/workflows/ipcr.wf --configfile /home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/config/config_ipcr.yaml
+
+# run this snakemake pipeline
+#   snakemake --cores 24 --use-conda --snakefile /home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/workflows/ipcr.wf --configfile /home/f.comoglio/gitlab/epmatrix/epsure_pipeline/v2/config/config_ipcr.yaml

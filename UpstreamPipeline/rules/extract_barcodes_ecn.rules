@@ -1,0 +1,19 @@
+# Validate params
+    # No dependency on config
+
+# Rule
+rule extract_barcodes_from_fq:
+  """
+  Extract barcodes from cDNA/pDNA fastq files
+  Output folder: Results/
+  """
+    input:
+        reads = os.path.join(fastq_dir, '{ecn}' + mate_suffix + '.' + ext)
+    output:
+        tsv = os.path.join(res_dir, '{ecn}_barcodes.tsv')
+    log:
+        os.path.join(log_dir, 'py/{ecn}_extract_barcodes_from_fq.log')
+    conda:
+        os.path.join(conda_env, 'starcode.yaml')
+    script:
+        '../py/extract_bc_from_fq.py'

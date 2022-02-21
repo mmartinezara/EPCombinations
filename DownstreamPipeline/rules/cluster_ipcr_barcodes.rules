@@ -1,0 +1,50 @@
+# Validate params
+    # No dependency on config
+
+# Rule
+rule cluster_ipcr_barcodes_and_merge:
+  """
+  Cluster iPCR barcodes with Starcode
+  Merge barcode counts and fragment identity
+  Retain unambiguous barcode assignments
+  Output folder: Results/
+  """
+    input:
+        frag        = os.path.join(res_dir, '{sample}_barcodes_frag_id.tsv')
+    output:
+        ofn         = os.path.join(res_dir, '{sample}_unique_barcodes_frag_id_merged.tsv'),
+        starcode_in = temp('starcode_input_{sample}.tsv'),
+        query       = temp('query_{sample}.tmp'),
+        subject     = temp('subject_{sample}.tmp')
+    log:
+        os.path.join(log_dir, 'py/{sample}_cluster_barcodes_and_merge.log')
+    conda:
+        os.path.join(conda_env, 'starcode.yaml')
+    threads: 8
+    shell:
+        """
+        # sort by barcode +
+        # extract unique barcode-fragment combinations (query)
+
+        sort -k1,1 {input.frag} | uniq > {output.query}
+        
+        # write Starcode input barcodes
+        
+        cut -f1 {input.frag} > {output.starcode_in}
+        
+        # run Starcode tracking cluster elements +
+        # sort by barcode (subject)
+
+        starcode --threads {threads} --print-clusters -i {output.starcode_in} | \
+        sort -k1,1 > {output.subject}
+
+        # merge query and subject by consensus barcode
+        # we no longer remove ambiguous barcodes assigned to more than one fragment. 
+        # I implemented that step at the experiment level when processing the data afterwards in R.
+        join -t $'\t' -j 1 -o 2.1,1.2,1.3,1.4,1.5,2.2,2.3 \
+        {output.query} {output.subject} > {output.ofn}
+        #Previous version with ambiguous barcode removal
+        #join -t $'\t' -j 1 -o 2.1,1.2,1.3,1.4,1.5,2.2,2.3 \
+        #{output.query} {output.subject} | uniq -w 20 -u > {output.ofn}
+        echo "Written and quantified $(wc -l < {output.ofn}) barcodes."
+        """

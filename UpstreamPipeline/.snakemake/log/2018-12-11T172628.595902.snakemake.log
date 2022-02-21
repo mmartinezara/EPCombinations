@@ -1,0 +1,3 @@
+WorkflowError in line 83 of /home/m.martinez.ara/mydata/GitLab/epmatrix/epsure_pipeline/v2/workflows/ecn.wf:
+Failed to open /home/m.martinez.ara/mydata/GitLab/epmatrix/epsure_pipeline/v2/workflows/~/mydata/GitLab/epmatrix/epsure_pipeline/v2/rules/extract_barcodes_ecn.rules.
+  File "/home/m.martinez.ara/mydata/GitLab/epmatrix/epsure_pipeline/v2/workflows/ecn.wf", line 83, in <module>

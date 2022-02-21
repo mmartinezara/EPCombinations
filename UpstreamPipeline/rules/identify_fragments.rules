@@ -1,0 +1,20 @@
+# Validate params
+    # No dependency on config
+
+# Rule
+rule identify_frags:
+  """
+  Identify iPCR fragments
+  Assign orientation and barcodes
+  Output folder: Results/
+  """
+    input:
+        bam       = os.path.join(res_dir, 'Bowtie2_aln/{sample}_sorted.bam')
+    output:
+        tsv       = os.path.join(res_dir, '{sample}_barcodes_frag_id.tsv')
+    log:
+        os.path.join(log_dir, 'py/{sample}_identify_frags.log')
+    conda:
+        os.path.join(conda_env, 'starcode.yaml')
+    script:
+        '../py/identify_frags.py'

@@ -1,0 +1,11 @@
+---
+name: bowtie2
+channels:
+  - conda-forge
+  - bioconda
+  - r
+  - defaults
+dependencies:
+  - bowtie2=2.3.4
+  - sambamba=0.6.6
+...

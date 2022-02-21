@@ -1,0 +1,26 @@
+# Validate params
+    # No dependency on config
+
+# Rule
+rule cluster_ecn_barcodes:
+  """
+  Cluster cDNA/pDNA barcodes with Starcode
+  Output folder: Results/
+  """
+    input:
+        barcodes = os.path.join(res_dir, '{ecn}_barcodes.tsv')
+    output:
+        ofn = os.path.join(res_dir, '{ecn}_barcode_counts.tsv')
+    log:
+        os.path.join(log_dir, 'py/{ecn}_cluster_ecn_barcodes.log')
+    conda:
+        os.path.join(conda_env, 'starcode.yaml')
+    threads: 8
+    shell:
+        """
+        # run Starcode tracking cluster elements +
+        # sort by barcode (subject)
+
+        starcode --threads {threads} --print-clusters -i {input.barcodes} | \
+        sort -k1,1 > {output.ofn}
+        """

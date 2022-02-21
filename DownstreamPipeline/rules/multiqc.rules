@@ -1,0 +1,31 @@
+# Set parameters
+
+if not "multiqc" in config.keys():
+    config["multiqc"] = {}
+
+if not "other_options" in config["multiqc"].keys():
+    config["multiqc"]["other_options"] = ""
+
+
+# Rule
+rule multiqc:
+  """
+  Run multiQC
+  Combine QC once bowtie2 aln completed
+  Note: by default excluding .snakemake directory
+  """
+    input:
+        expand(os.path.join(res_dir, 'FastQC/{sample}' + mate_suffix[0] + '_fastqc.html'), sample = SAMPLE_IDS),
+        expand(os.path.join(res_dir, 'Bowtie2_aln/{sample}_sorted.bam'), sample = SAMPLE_IDS)
+    output:
+        report     = os.path.join(res_dir, 'FastQC/multiqc.html')
+    params:
+        out_dir    = os.path.join(res_dir, 'FastQC'),
+        out_prefix = 'multiqc',
+        options    = config['multiqc']['other_options']
+    log:
+        os.path.join(log_dir, 'multiqc.log')
+    conda:
+        os.path.join(conda_env, 'multiqc.yaml')
+    shell:
+        'multiqc {params.options} --outdir {params.out_dir} --filename {params.out_prefix} . &> {log}'

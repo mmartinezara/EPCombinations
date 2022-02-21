@@ -1,0 +1,51 @@
+###############
+# Global params
+
+  # for records
+  description:        'P-E-SuRE iPCR data analysis pipeline'
+  dataset:            'iPCR runs, Split Design, PE sequencing'
+
+  # params
+  genome:
+    fasta_file:       'fc180419_dat_klf2_sense_ordered.fasta'
+    bt2_index_prefix: 'Bt2index/dat_klf2_index'
+
+  metadata:
+    samples:          '/YOURDIR/Split/smk_meta/2019_04_05_smk_Split_ipcr.tsv'
+    seq_type:         'pe' # se or pe
+    mate_suffix:      '_R1,_R2' # for PE reads, the mate suffix
+    input_format:     'fastq.gz'
+
+  dir:
+    fastq_dir:        '/YOURDIR/Split/ipcr/Raw'
+    genome:           '/YOURDIR/data/tad_deconstr_design/designs/sense_fasta_for_bt2'
+    results:          'ResultsV2'
+    logs:             'LogsV2'
+    conda_env:        '/YOURDIR/DownstreamPipeline/envs'
+    snakerules:       '/YOURDIR/DownstreamPipeline/rules'
+
+###############
+# Optional params
+# used by rules & programs other than defaults
+
+  fastqc:
+    other_options: '--quiet'
+
+  multiqc:
+    other_options: '--force --quiet --ignore *.snakemake'
+
+  bowtie2:
+    other_options: ''
+
+################
+# Notes:
+# To generate metadata file for snakemake run:
+#   cd /DATA/projects/epmatrix/mouse/DAT_EP010_EP013/smk_meta
+#   cut -f1-2 /DATA/projects/epmatrix/metadata/E43_DAT_metadata.txt | grep nanog > tmp.tsv; echo -e "sample.id\tfq.files" | cat - tmp.tsv > 2018_07_05_smk_nanog_ipcr.tsv; rm tmp.tsv
+# the pipeline uses sample.id column
+
+# dry run this snakemake pipeline
+#   snakemake -n --snakefile /YOURDIR/DownstreamPipeline/workflows/ipcr.wf --configfile /YOURDIR/DownstreamPipeline/runs/MMA20200925_Split_E62_ipcr.yaml
+# run this snakemake pipeline
+#   snakemake --cores 24 --use-conda --snakefile /YOURDIR/DownstreamPipeline/workflows/ipcr.wf --configfile /YOURDIR/DownstreamPipeline/runs/MMA20200925_Split_E62_ipcr.yaml
+
