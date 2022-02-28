@@ -1,0 +1,889 @@
+---
+title: "MMA20200727_NC_EPSuRE_Raw_to_Boost_V3pipeline_V5Norm"
+author: "MMA"
+date: "27/7/2020"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE, 
+                      message    = FALSE, 
+                      warning    = FALSE, 
+                      cache      = TRUE,
+                      autodep    = TRUE,
+                      fig.align  = 'center', 
+                      fig.width  = 6, 
+                      fig.height = 6)
+```
+
+```{r libs and fun}
+library(tidyverse)
+library(here)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(gridExtra)
+library(pander)
+library(cowplot)
+library(circlize)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+
+```
+
+# Intro
+
+In this document I am processing and merging together the iPCR data for EP libraries 10-13 (Klf2 and Nanog Comb and Basal, seq data E43) and 16-17 (NCs+Klf2, seq data E86) with the ecn data generated in E87 wich includes all the 6 libraries mentioned.
+
+# Preprocessing
+## iPCR 
+
+We loaded basal and combinatorial iPCR libraries from the EP pipeline v3 (include empty fragments).
+
+```{r process ipcr basal lib}
+
+
+# load basal libraries
+tib_basal_klf2  <- read_ipcr('/DATA/projects/epmatrix/mouse/DAT_EP010_EP013/ipcr/Results_v3/ipcr_E43_EP013_dat_klf2_basal_miseq_br1_unique_barcodes_frag_id_merged.tsv')
+tib_basal_nanog <- read_ipcr('/DATA/projects/epmatrix/mouse/DAT_EP010_EP013/ipcr/Results_v3/ipcr_E43_EP011_dat_nanog_basal_miseq_br1_unique_barcodes_frag_id_merged.tsv')
+tib_basal_NCklf2 <- read_ipcr('~/epmatrix/mouse/DAT_EP016_EP017/ipcr/Results_v3/E85_iPCR_EP016_BasalNC_miseq_br1_unique_barcodes_frag_id_merged.tsv')
+
+allBasal_ipcr_merged<-bind_rows(tib_basal_klf2,tib_basal_nanog,tib_basal_NCklf2)
+
+#count empty fragments
+tib_basal_klf2%>% filter(frag1=="eempty")%>% nrow()
+tib_basal_nanog%>% filter(frag1=="eempty")%>% nrow()
+tib_basal_NCklf2%>% filter(frag1=="eempty")%>% nrow()
+
+
+# count heterotypic
+
+tib_basal_klf2%>% filter(frag1!=frag2 | strand1!=strand2)%>% nrow()
+tib_basal_nanog%>% filter(frag1!=frag2 | strand1!=strand2)%>% nrow()
+tib_basal_NCklf2%>% filter(frag1!=frag2 | strand1!=strand2)%>% nrow()
+
+# remove heterotypic
+tib_basal_klf2 <- remove_heterotypic(tib_basal_klf2)
+tib_basal_nanog <- remove_heterotypic(tib_basal_nanog)
+tib_basal_NCklf2 <- remove_heterotypic(tib_basal_NCklf2)
+
+# fragment representation
+count_fragments(tib_basal_klf2)
+count_elements(tib_basal_klf2)
+count_bc_reads(tib_basal_klf2)
+
+count_fragments(tib_basal_nanog)
+count_elements(tib_basal_nanog)
+count_bc_reads(tib_basal_nanog)
+
+count_fragments(tib_basal_NCklf2)
+count_elements(tib_basal_NCklf2)
+count_bc_reads(tib_basal_NCklf2)
+```
+
+```{r process ipcr comb lib}
+# load combinatorial library
+tib_comb_klf2  <- read_ipcr('/DATA/projects/epmatrix/mouse/DAT_EP010_EP013/ipcr/Results_v3/ipcr_E43_EP012_dat_klf2_combinatorial_miseq_br1_unique_barcodes_frag_id_merged.tsv')
+tib_comb_nanog <- read_ipcr('/DATA/projects/epmatrix/mouse/DAT_EP010_EP013/ipcr/Results_v3/ipcr_E43_EP010_dat_nanog_combinatorial_miseq_br1_unique_barcodes_frag_id_merged.tsv')
+tib_comb_NCKlf2 <- read_ipcr('~/epmatrix/mouse/DAT_EP016_EP017/ipcr/Results_v3/E85_iPCR_EP017_CombNC_miseq_br1_unique_barcodes_frag_id_merged.tsv')
+
+allComb_ipcr_merged<-bind_rows(tib_comb_klf2,tib_comb_nanog,tib_comb_NCKlf2)
+
+#count empty fragments
+tib_comb_klf2%>% filter(frag1=="eempty")%>% nrow()
+tib_comb_nanog%>% filter(frag1=="eempty")%>% nrow()
+tib_comb_NCKlf2%>% filter(frag1=="eempty")%>% nrow()
+
+# count homotypic
+tib_comb_klf2%>% filter(frag1==frag2 & strand1==strand2)%>% nrow()
+tib_comb_nanog%>% filter(frag1==frag2 & strand1==strand2)%>% nrow()
+tib_comb_NCKlf2%>% filter(frag1==frag2 & strand1==strand2)%>% nrow()
+
+#put appart empty fragments
+tib_comb_klf2_empty<-tib_comb_klf2%>% filter(frag1=="eempty")
+tib_comb_nanog_empty<-tib_comb_nanog%>% filter(frag1=="eempty")
+tib_comb_NCKlf2_empty<-tib_comb_NCKlf2%>% filter(frag1=="eempty")
+
+# mark and remove basal fragments from comb library. NOTE: It also removes empty fragments, that is why we put them appart before and bring them back afterwards.
+tib_comb_klf2_het  <- mark_basal(tib_comb_klf2) %>%
+  filter(!with_basal)
+tib_comb_nanog_het  <- mark_basal(tib_comb_nanog) %>%
+  filter(!with_basal)
+tib_comb_NCKlf2_het<- mark_basal(tib_comb_NCKlf2) %>%
+  filter(!with_basal)
+
+# bring back empty elements
+tib_comb_klf2_hetempty<-bind_rows(tib_comb_klf2_het,tib_comb_klf2_empty)
+tib_comb_nanog_hetempty<-bind_rows(tib_comb_nanog_het,tib_comb_nanog_empty)
+tib_comb_NCKlf2_hetempty<-bind_rows(tib_comb_NCKlf2_het,tib_comb_NCKlf2_empty)
+```
+### get list of unique barcodes
+```{r}
+#merge all to check proper barcode clashing
+all_ipcr_merged<-bind_rows(allBasal_ipcr_merged,allComb_ipcr_merged)
+# get unique barcodes before filtering
+all_ipcr_merged_unique<-all_ipcr_merged %>%
+  ungroup()%>%
+  nest(-barcode ) %>% 
+  mutate(n = map_dbl(data, nrow))%>%
+  filter(n==1)%>%
+  unnest()%>% 
+  select(-n)
+```
+
+### Adding pDNA and cDNA data
+
+For each iPCR library, we combined pDNA and cDNA data, retaining all barcodes with pDNA counts $\geq$ 1 and detected across all replicates.
+
+```{r batch1 merge ipcr and ecn data}
+
+###### To do Change all names and data loading
+
+# read expression data (cdna)
+tib_expr_br1 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP016_EP017/ecn/Results_v3/E87_NC_Klf2Nanog_EPSuRE_cDNA_BR1_barcode_counts.tsv', col_lab = 'cdna_counts_br1')
+tib_expr_br2 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP016_EP017/ecn/Results_v3/E87_NC_Klf2Nanog_EPSuRE_cDNA_BR2_barcode_counts.tsv', col_lab = 'cdna_counts_br2')
+tib_expr_br3 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP016_EP017/ecn/Results_v3/E87_NC_Klf2Nanog_EPSuRE_cDNA_BR3_barcode_counts.tsv', col_lab = 'cdna_counts_br3')
+
+# read copy number data (pdna)
+tib_cn_br1   <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP016_EP017/ecn/Results_v3/E87_NC_Klf2Nanog_EPSuRE_pDNA_BR1_barcode_counts.tsv', col_lab = 'pdna_counts_br1')
+tib_cn_br2  <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP016_EP017/ecn/Results_v3/E87_NC_Klf2Nanog_EPSuRE_pDNA_BR2_barcode_counts.tsv', col_lab = 'pdna_counts_br2')
+
+# merge datasets Klf2
+tib_basal_merged_klf2_v3_b3  <- merge_ipcr_ecn(tib           = tib_basal_klf2, 
+                                           cn_tib_list    = list(tib_cn_br1, tib_cn_br2),
+                                           expr_tib_list  = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+tib_comb_merged_klf2_v3_b3   <- merge_ipcr_ecn(tib           = tib_comb_klf2_hetempty, 
+                                           cn_tib_list    = list(tib_cn_br1, tib_cn_br2),
+                                           expr_tib_list  = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+# merge datasets Klf2
+tib_basal_merged_nanog_v3_b3 <- merge_ipcr_ecn(tib           = tib_basal_nanog, 
+                                           cn_tib_list    = list(tib_cn_br1, tib_cn_br2),
+                                           expr_tib_list  = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+tib_comb_merged_nanog_v3_b3  <- merge_ipcr_ecn(tib           = tib_comb_nanog_hetempty, 
+                                           cn_tib_list    = list(tib_cn_br1, tib_cn_br2),
+                                           expr_tib_list  = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+# merge datasets NCs
+tib_basal_merged_NCklf2_v3_b3  <- merge_ipcr_ecn(tib           = tib_basal_NCklf2, 
+                                           cn_tib_list    = list(tib_cn_br1, tib_cn_br2),
+                                           expr_tib_list  = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+tib_comb_merged_NCklf2_v3_b3   <- merge_ipcr_ecn(tib           = tib_comb_NCKlf2_hetempty, 
+                                           cn_tib_list    = list(tib_cn_br1, tib_cn_br2),
+                                           expr_tib_list  = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+```
+
+### Merging klf2 and nanog datasets b2
+```{r}
+tib_basal_merged_klf2_v3_b3_idlib<-tib_basal_merged_klf2_v3_b3 %>% 
+  mutate(id=paste0(id, "_klf2basal"))
+
+tib_comb_merged_klf2_v3_b3_idlib<-tib_comb_merged_klf2_v3_b3 %>% 
+  mutate(id=paste0(id, "_klf2comb"))
+
+tib_basal_merged_nanog_v3_b3_idlib<-tib_basal_merged_nanog_v3_b3 %>% 
+  mutate(id=paste0(id, "_nanogbasal"))
+
+tib_comb_merged_nanog_v3_b3_idlib<-tib_comb_merged_nanog_v3_b3 %>% 
+  mutate(id=paste0(id, "_nanogcomb"))
+
+tib_basal_merged_NCklf2_v3_b3_idlib<-tib_basal_merged_NCklf2_v3_b3 %>% 
+  mutate(id=paste0(id, "_NCklf2basal"))
+
+tib_comb_merged_NCklf2_v3_b3_idlib<-tib_comb_merged_NCklf2_v3_b3 %>% 
+  mutate(id=paste0(id, "_NCklf2comb"))
+
+# v3_b3_v4 stands for v3 EP-sure pipeline, batch 3 expression data generation (with NC libs), v4 data normalisation.
+
+tib_all_NCklf2nanog_v3_b3_v4<-bind_rows(tib_basal_merged_klf2_v3_b3_idlib,tib_comb_merged_klf2_v3_b3_idlib,tib_basal_merged_nanog_v3_b3_idlib,tib_comb_merged_nanog_v3_b3_idlib,tib_basal_merged_NCklf2_v3_b3_idlib, tib_comb_merged_NCklf2_v3_b3_idlib )
+
+#new barcode clashing removal
+# This step is now crucial because there is no barcode clashing removal in the pipeline
+#tib_all_NCklf2nanog_v3_b3_v4_unique <- tib_all_NCklf2nanog_v3_b3_v4 %>% ungroup()%>%
+#  nest(-barcode ) %>% 
+#  mutate(n = map_dbl(data, nrow))%>%
+#  filter(n==1)%>%
+#  unnest()%>% 
+#  select(-n)
+
+# Barcode clashing is done before datasets polishing in parallel, and then applied here
+tib_all_NCklf2nanog_v3_b3_v4_unique<-tib_all_NCklf2nanog_v3_b3_v4%>%
+  filter(barcode %in% all_ipcr_merged_unique$barcode)
+```
+
+# Barcode counts distributions
+
+```{r pDNA_BarcodeCountDistributions}
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  ggplot(aes(pdna_counts_br1))+
+  geom_histogram()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  ggplot(aes(log10(pdna_counts_br1)))+
+  geom_histogram()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  ggplot(aes(pdna_counts_br2))+
+  geom_histogram()
+
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  ggplot(aes(log10(pdna_counts_br2)))+
+  geom_histogram()
+```
+
+
+```{r pDNA_BarcodeCountDistributions}
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  ggplot(aes(cdna_counts_br1))+
+  ylim(c(0,4e+06))+
+  geom_histogram()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  mutate(cdna_counts_br1=cdna_counts_br1+1)%>%
+  ggplot(aes(log10(cdna_counts_br1)))+
+   ylim(c(0,2e+06))+
+  geom_histogram(binwidth = 0.1)
+
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  ggplot(aes((cdna_counts_br2)))+
+    ylim(c(0,4e+05))+
+  geom_histogram()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+   mutate(cdna_counts_br2=cdna_counts_br2+1)%>%
+  ggplot(aes(log10(cdna_counts_br2)))+
+     ylim(c(0,2e+06))+
+  geom_histogram(binwidth = 0.1)
+
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  ggplot(aes((cdna_counts_br3)))+
+    ylim(c(0,4e+05))+
+  geom_histogram()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  mutate(cdna_counts_br3=cdna_counts_br3+1)%>%
+  ggplot(aes(log10(cdna_counts_br3)))+
+     ylim(c(0,2e+06))+
+  geom_histogram(binwidth = 0.1)
+```
+
+```{r}
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+      arrange(desc(pdna_counts_br1)) %>%
+      mutate(n_cum = cumsum(pdna_counts_br1)) %>%
+      ggplot(aes( 1 : length(n_cum), n_cum,)) +
+        geom_line() +
+        labs(x = 'Cumulative read counts', y = 'Cumulative # of barcodes') +
+        theme_bw()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+      arrange(desc(pdna_counts_br2)) %>%
+      mutate(n_cum = cumsum(pdna_counts_br2)) %>%
+      ggplot(aes( 1 : length(n_cum), n_cum)) +
+        geom_line() +
+        labs(x = 'Cumulative read counts', y = 'Cumulative # of barcodes') +
+        theme_bw()
+```
+
+
+```{r}
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+  filter(!cdna_counts_br1==0)%>%
+      arrange(desc(cdna_counts_br1)) %>%
+      mutate(n_cum = cumsum(cdna_counts_br1)) %>%
+      ggplot(aes( 1 : length(n_cum), n_cum,)) +
+        geom_line() +
+        labs(x = 'Cumulative read counts', y = 'Cumulative # of barcodes') +
+        theme_bw()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+    filter(!cdna_counts_br2==0)%>%
+      arrange(desc(cdna_counts_br2)) %>%
+      mutate(n_cum = cumsum(cdna_counts_br2)) %>%
+      ggplot(aes( 1 : length(n_cum), n_cum)) +
+        geom_line() +
+        labs(x = 'Cumulative read counts', y = 'Cumulative # of barcodes') +
+        theme_bw()
+
+tib_all_NCklf2nanog_v3_b3_v4_unique%>%
+    filter(!cdna_counts_br3==0)%>%
+      arrange(desc(cdna_counts_br3)) %>%
+      mutate(n_cum = cumsum(cdna_counts_br3)) %>%
+      ggplot(aes( 1 : length(n_cum), n_cum)) +
+        geom_line() +
+        labs(x = 'Cumulative read counts', y = 'Cumulative # of barcodes') +
+        theme_bw()
+```
+
+# Processing v4
+
+```{r}
+# offsets are computed after combining pDNA counts, from pDNA count columns, after filtering
+auto_process_v4 <- function(tib_all, min_pdna, min_n_bc, avg_type) {
+
+  # sum pdna counts across replicates
+   tib_all    <- combine_cn(tib_all)
+
+  # remove barcodes with pDNA reads < threshold
+  tib_all    <- filter_cn(tib_all, min_pdna = min_pdna)
+
+
+  # remove barcodes of elements with < threshold distinct barcodes
+  tib_all    <- filter_barcodes(tib_all, min_n_bc = min_n_bc,  main = 'AllBC')
+
+  # compute offsets
+  offsets_all <- tib_all %>%
+    dplyr::select(contains('dna_counts')) %>%
+    colSums() / 1e6
+  names(offsets_all) <- names(offsets_all) %>%
+    str_replace('_counts', '')
+  
+  message('norm factors', offsets_all)
+  
+    
+  # normalize to library sizes
+  tib_all    <- normalize_counts(tib_all, offsets_all)
+
+  # compute activities and summarize barcodes
+  tib_all    <- compute_activities(tib_all)
+
+  # summarize activities (weighted average)
+  tib_all    <- summarize_barcodes(tib_all, type = avg_type)
+
+#  if(missing(signal_t)) {
+
+    # model combinatorial activity distributions
+ #   signal_t     <- learn_min_activity(tib_comb)
+
+ # }
+
+ # # compute cooperativity
+#  tib_comb_all <- compute_cooperativity(tib_comb, tib_basal, signal_t = signal_t, remove_inactive = FALSE)
+ # tib_comb     <- compute_cooperativity(tib_comb, tib_basal, signal_t = signal_t, remove_inactive = TRUE)
+
+  # add metadata
+ # tib_basal    <- add_metadata(tib_basal, tib_dat = tib_dat, type = 'basal')
+#  tib_comb     <- add_metadata(tib_comb, tib_dat = tib_dat, type = 'comb')
+ # tib_comb_all <- add_metadata(tib_comb_all, tib_dat = tib_dat, type = 'comb')
+
+  # return list of tibs
+  return(tib_all)
+
+}
+```
+
+```{r}
+# min number of barcodes
+min_n_bc <- 5
+# min copy number
+min_pdna <- 8
+
+tib_all_v3_b3_v4<-auto_process_v4(tib_all_NCklf2nanog_v3_b3_v4_unique,
+                min_pdna  = min_pdna, 
+                min_n_bc  = min_n_bc, 
+                avg_type  = 'avg')
+```
+
+
+## Postprocessing
+### Separate libraries
+```{r}
+tib_all_v3_b3_v4_idsplit <- tib_all_v3_b3_v4 %>% 
+  mutate(library=sapply(str_split(id, "_"), function(x) x[2])) %>% 
+  mutate(id= sapply(str_split(id, "_"), function(x) x[1]))
+
+
+tib_basal_klf2_v3_b3_v4 <- tib_all_v3_b3_v4_idsplit %>% filter(library == "klf2basal")
+
+tib_comb_klf2_v3_b3_v4 <- tib_all_v3_b3_v4_idsplit %>% filter(library == "klf2comb")
+
+tib_basal_nanog_v3_b3_v4 <- tib_all_v3_b3_v4_idsplit %>% filter(library == "nanogbasal")
+
+tib_comb_nanog_v3_b3_v4 <- tib_all_v3_b3_v4_idsplit %>% filter(library == "nanogcomb")
+
+tib_basal_NCklf2_v3_b3_v4 <- tib_all_v3_b3_v4_idsplit %>% filter(library == "NCklf2basal")
+
+tib_comb_NCklf2_v3_b3_v4 <- tib_all_v3_b3_v4_idsplit %>% filter(library == "NCklf2comb")
+
+
+```
+
+
+
+### Compute Coop V4 standard
+
+### Compute Coop V4 Empty
+```{r}
+compute_cooperativity_v4 <- function(tib_comb, tib_basal) {
+
+ 
+  # generate key pair to extract basal activities of frag1/frag2
+  tib_basal_act <- tib_comb %>%
+    # add temp ids matching basal library id for each element of pair
+    mutate(id_frag1 = paste0(frag1, strand1, frag1, strand1),
+           id_frag2 = paste0(frag2, strand2, frag2, strand2)) %>%
+    dplyr::select(id_frag1, id_frag2) %>%
+    # extract activities basal frag 1
+    left_join(dplyr::select(tib_basal, id, starts_with('activity')),
+              by = c("id_frag1" = "id")) %>%
+    # extract activities basal frag 2
+    left_join(dplyr::select(tib_basal, id, starts_with('activity')),
+              by = c("id_frag2" = "id"),
+              suffix = c('_frag1', '_frag2')) %>%
+    dplyr::select(-c(id_frag1, id_frag2))
+
+  # add basal activities to comb
+  tib_activities <- bind_cols(tib_comb, tib_basal_act)%>%
+    mutate(boost_all=log2(activity_all/activity_all_frag2))%>%
+    #mutate(coop_all=log2(activity_all/(activity_all_frag2+activity_all_frag1)))%>%
+    dplyr::select(starts_with('activity'), boost_all)
+
+  tib_comb <- bind_cols(tib_comb, tib_activities%>% select(-activity_br1,-activity_br2,-activity_br3, -activity_all))
+  tib_comb
+}
+
+```
+
+
+```{r}
+tib_comb_klf2_processed_v4B3<-compute_cooperativity_v4(tib_comb_klf2_v3_b3_v4,tib_basal_klf2_v3_b3_v4)
+tib_comb_nanog_processed_v4B3<-compute_cooperativity_v4(tib_comb_nanog_v3_b3_v4,tib_basal_nanog_v3_b3_v4)
+tib_comb_NCklf2_processed_v4B3<-compute_cooperativity_v4(tib_comb_NCklf2_v3_b3_v4,tib_basal_NCklf2_v3_b3_v4)
+
+
+tib_comb_klf2_processed_v4B3%>% 
+  ggplot(aes(library,boost_all))+
+          # geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.03, size=0.1, width = 0.2)+
+  geom_boxplot()+
+    theme_bw()+
+  ylim(c(-2.5,2.5))+
+  geom_boxplot()+
+  ggtitle("B3 V4 Boost Klf2")
+
+tib_comb_NCklf2_processed_v4B3%>% 
+    filter((!substring(frag1, 1, 1)=="P"))%>%
+  ggplot(aes(library,boost_all))+
+          # geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.03, size=0.1, width = 0.2)+
+  geom_boxplot()+
+    theme_bw()+
+  ylim(c(-2.5,2.5))+
+  geom_boxplot()+
+  ggtitle("B3 V4 Boost NCKlf2")
+```
+## Save tibs
+
+```{r save tibbles}
+save(list = c('tib_comb_klf2_processed_v4B3', 'tib_comb_nanog_processed_v4B3', 'tib_comb_NCklf2_processed_v4B3', 'tib_comb_klf2_v3_b3_v4','tib_basal_klf2_v3_b3_v4','tib_comb_nanog_v3_b3_v4','tib_basal_nanog_v3_b3_v4', 'tib_comb_NCklf2_v3_b3_v4', 'tib_basal_NCklf2_v3_b3_v4' ),
+     file = '~/mydata/GitLab/epmatrix/data/MMA20200804_NCKlf2Nanog_EPSuRE_v3_B3_v4.RData')
+```
+
+# Matrix
+
+```{r}
+load('~/mydata/GitLab/epmatrix/data/MMA20200804_NCKlf2Nanog_EPSuRE_v3_B3_v4.RData')
+```
+
+
+```{r ploot matrix function, include=FALSE}
+
+#Function to plot the Boosting index Matrix 
+plot_coop_heatmap_simple <- function(tib, classs = 'all' , skip_n_lab = 1) {
+
+  # validate args
+  if(!classs %in% c('all', 'EE', 'EP', 'PE', 'PP', 'EN', 'PN', 'NP', 'NN'))
+    stop('Undefined class type. Please use one of EE, EP, PE or PP, or leave default for all pairs')
+
+  if(classs != 'all') {
+    # note: tib %>% filter(class == get('class')) fails
+    # see https://stackoverflow.com/questions/40169949/filter-dataframe-using-global-variable-with-the-same-name-as-column-name
+
+    tib     <- tib %>% filter(class %in% class)
+  }
+
+  # set color palette
+  pal <- c('navyblue', 'gray95', 'orangered')
+
+  # static viz
+
+
+      # compute coop index range
+      y_min <- min(tib[['boost']], na.rm = TRUE)
+      y_max <- max(tib[['boost']], na.rm = TRUE)
+
+      # coop index heatmap (additive)
+      p_main <- tib %>%
+        ggplot(aes(x = id1, y = id2)) +
+        geom_tile(fill = 'gray40') +
+        #        geom_tile(color = 'gray20', alpha = 0, size = 0.5) + ## prev version with stroke
+        #        geom_tile(fill = rgb(53/255, 143/255, 168/255, 0.1)) + ## prev version with color outside coop idx palette
+        geom_raster(data = tib, aes(x = id1, y = id2, fill = boost))
+
+    
+
+
+    # marginal barplots
+      
+      tib_p_top <- tib %>%
+      select(id1, activity_all_frag1) %>%
+      distinct() %>%
+      mutate(activity_orig = log2(activity_all_frag1),
+             shift    = min(activity_orig[!is.infinite(activity_orig)], na.rm = TRUE),
+             activity = activity_orig)
+      
+    p_top <- tib_p_top %>%
+      ggplot(aes(id1, activity)) +
+      geom_bar(stat = 'identity') +
+      ylim(c(-5,5))
+     # scale_y_continuous(breaks = c(min(tib_p_top[['activity']][!is.infinite(tib_p_top[['activity']])]),
+     #                               max(tib_p_top[['activity']])),
+      #                   labels = c(signif(min(tib_p_top[['activity_orig']][!is.infinite(tib_p_top[['activity_orig']])]), 2),
+       #                             signif(max(tib_p_top[['activity_orig']]), 2)))
+
+    tib_p_right <- tib %>%
+      select(id2, activity_all_frag2) %>%
+      distinct() %>%
+      mutate(activity_orig = log2(activity_all_frag2),
+             shift    = min(activity_orig[!is.infinite(activity_orig)], na.rm = TRUE),
+             activity = activity_orig )
+
+    p_right <- tib_p_right %>%
+      ggplot(aes(id2, activity)) +
+      geom_bar(stat = 'identity') +
+      ylim(c(-5,5))+
+      #scale_y_continuous(breaks = c(min(tib_p_right[['activity']][!is.infinite(tib_p_right[['activity']])]),
+      #                              max(tib_p_right[['activity']])),
+                        # labels = c(signif(min(tib_p_right[['activity_orig']][!is.infinite(tib_p_right[['activity_orig']])]), 2),
+                                   # signif(max(tib_p_right[['activity_orig']]), 2))) +
+      coord_flip()
+
+    # cosmetics
+    p_main <- p_main +
+      scale_fill_gradientn(colors = pal,
+                           values = rescale(c(y_min, 0, y_max))) +
+      labs(x = 'Enhancers', y = 'Promoters', fill = 'Boosting Index', caption = paste0('(n = ', nrow(tib), ' pairs)')) +
+      theme(axis.text.x      = element_text(angle = 90, color =  c('black', rep('transparent', skip_n_lab))),
+            axis.text.y      = element_text(color =  c('black', rep('transparent', 1))),
+            panel.grid       = element_blank(),
+            panel.background = element_rect(fill = "white"),
+            legend.position  = 'bottom',
+            text             = element_text(size = 13),)
+
+    p_top <- p_top +
+      labs(x = NULL,  y = 'Basal Activity (log2)') +
+      theme_bw() +
+      theme(axis.line.x  = element_line(size = 0, colour = "white"),
+            axis.ticks.x = element_line(size = 0),
+            axis.text.x  = element_blank(),
+            panel.border = element_blank(),
+            panel.grid   = element_blank(),
+            text         = element_text(size = 13))
+    
+    p_right <- p_right +
+      labs(x = NULL,  y = 'Basal Activity (log2)') +
+      theme_bw() +
+      theme(axis.line.y  = element_line(size = 0, colour = "white"),
+            axis.ticks.y = element_line(size = 0),
+            axis.text.y  = element_blank(),
+            panel.border = element_blank(),
+            panel.grid   = element_blank(),
+            text         = element_text(size = 13))
+
+    p_empty <- ggplot(mtcars, aes(wt, mpg)) +
+      theme(line             = element_blank(),
+            text             = element_blank(),
+            title            = element_blank(),
+            panel.background = element_rect(fill = NA, size = 0), plot.background = element_rect(size = 0))
+    egg::ggarrange(p_top,
+                   p_empty,
+                   p_main,
+                   p_right,
+                   nrow = 2,
+                   ncol = 2,
+                   widths = c(3, 1),
+                   heights = c(1, 3))
+
+
+
+}
+```
+
+```{r, fig.width=7, fig.height=7}
+tib_comb_klf2_processed_v4B3%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1,strand1))%>%
+  mutate(class=paste0(substr(frag1,1,1), substr(frag2,1,1)))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  filter(class=="EP")%>%
+  ggplot(aes(class,boost))+
+  geom_violin(aes(fill=class), binaxis = "y", stackdir = "center", binwidth = 0.02)+
+  geom_boxplot(width=0.3)+
+  #facet_wrap(~id2)+
+  theme_bw(base_size = 15)+
+   ylim(c(-2.5,5))+
+  ggtitle("Boosting index distribution Upstream")
+```
+
+```{r, fig.height=10 , fig.width=20, include=FALSE}
+#make plot
+Klf2_matrix_b3_v4<-tib_comb_klf2_processed_v4B3%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1,strand1))%>%
+  mutate(class=paste0(substr(frag1,1,1), substr(frag2,1,1)))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  filter(class=="EP")%>%
+  filter(log2(activity_all_frag2)!=(-Inf))%>%
+  filter(log2(activity_all_frag1)!=(-Inf))%>%
+plot_coop_heatmap_simple( class = c('EP'), skip_n_lab = 0)
+
+Klf2_matrix_b3_v4
+```
+
+```{r, fig.height=10 , fig.width=20, include=FALSE}
+#make plot
+Klf2_matrix_b3_v4EE<-tib_comb_klf2_processed_v4B3%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1,strand1))%>%
+  mutate(class=paste0(substr(frag1,1,1), substr(frag2,1,1)))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  filter(class=="EE")%>%
+  filter(log2(activity_all_frag2)!=(-Inf))%>%
+  filter(log2(activity_all_frag1)!=(-Inf))%>%
+plot_coop_heatmap_simple( class = c('EE'), skip_n_lab = 0)
+
+Klf2_matrix_b3_v4EE
+```
+
+```{r, fig.height=10 , fig.width=20, include=FALSE}
+#make plot
+Klf2_matrix_b3_v4EEshort<-tib_comb_klf2_processed_v4B3%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1,strand1))%>%
+  mutate(class=paste0(substr(frag1,1,1), substr(frag2,1,1)))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  filter(class=="EE")%>%
+  filter(log2(activity_all_frag2)!=(-Inf))%>%
+  filter(log2(activity_all_frag1)!=(-Inf))%>%
+  filter(frag1%in% c("E005","E006", "E007", "E021", "E030", "E046","E048", "E057", "E058", "E061" ))%>%
+  filter(frag2%in% c("E005","E006", "E007", "E021", "E030", "E046","E048", "E057", "E058", "E061" ))%>%
+plot_coop_heatmap_simple( class = c('EE'), skip_n_lab = 0)
+
+Klf2_matrix_b3_v4EEshort
+```
+
+```{r, fig.height=10 , fig.width=20, include=FALSE}
+#save matrix
+pdf(file = "/DATA/usr/m.martinez.ara/GitLab/epmatrix/rproj/figures/klf2_b3_v4_EPmatrix_MMA20200803.pdf",   # The directory you want to save the file in
+    width = 30, # The width of the plot in inches
+    height = 15) # The height of the plot in inches
+ print(Klf2_matrix_b3_v4)
+
+dev.off()
+```
+
+## Matrix Negtive controls
+
+```{r fig.height=10, fig.height=10}
+tib_comb_NCklf2_processed_v4NormB3Class<-tib_comb_NCklf2_processed_v4B3%>%
+  mutate(class1= ifelse(substring(frag1, 1, 1)=="P", "P", ifelse(frag1=="eempty", "e", "N" )))%>%
+  mutate(class2= ifelse(substring(frag2, 1, 1)=="P", "P", ifelse(frag2=="eempty", "e", "N" )))%>%
+  mutate(class=paste0(class1,class2))%>%
+  filter(class!="PP")
+
+tib_comb_klf2_processed_v4NormB3Class<-tib_comb_klf2_processed_v4B3%>%
+  mutate(class1= ifelse(substring(frag1, 1, 1)=="P", "P", ifelse(frag1=="eempty", "e","E")))%>%
+  mutate(class2= ifelse(substring(frag2, 1, 1)=="P", "P", ifelse(frag2=="eempty", "e","E")))%>%
+  mutate(class=paste0(class1,class2))
+
+tib_allNCKlf2_v3_b3_v4<-bind_rows(tib_comb_klf2_processed_v4NormB3Class,tib_comb_NCklf2_processed_v4NormB3Class)
+
+
+```
+
+```{r, fig.height=15 , fig.width=30, include=FALSE}
+
+#Preprocessdata
+
+#make plot
+NCKlf2_matrix_b3_v4<-tib_allNCKlf2_v3_b3_v4%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1,strand1))%>%
+  #mutate(class=paste0(substr(frag1,1,1), substr(frag2,1,1)))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  filter(class%in%c('NP','PN','NN', 'PP'))%>%
+  filter(log2(activity_all_frag2)!=(-Inf))%>%
+  filter(log2(activity_all_frag1)!=(-Inf))%>%
+plot_coop_heatmap_simple( class = c('NP','PN','NN'), skip_n_lab = 0)
+
+NCKlf2_matrix_b3_v4
+```
+## Avtivity vs boost
+
+```{r Boosting_vs_promoter_activity, fig.width = 15, fig.height = 15}
+tib_allNCKlf2_v3_b3_v4 %>%
+  mutate(id2=paste0(frag2,strand2))%>%
+  mutate(id1=paste0(frag1,strand1))%>%
+  #mutate(class=paste0(substr(frag1,1,1), substr(frag2,1,1)))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  #filter(class %in% c("EP"))%>%
+  ggplot(aes(log2(activity_all_frag2), boost)) +
+  scale_color_gradient2(low = 'navyblue', mid='gray95', high = 'orangered', name="Activity cE (log2)", guide= guide_colourbar(barwidth = 1, barheight = 10))+
+  geom_point(size=1, alpha=0.7, aes(color=log2(activity_all_frag1))) +
+  #geom_jitter( size=1, alpha=0.7, color="black",shape = 21, aes(fill=boost)) +
+  xlab('Basal Activity Promoter (log2)') +
+  ylab('Boosting Index') +
+  ggtitle("Basal Activity Promoter vs Boosting v3 B3 v4") +
+  theme_bw(base_size=15) + 
+  geom_hline(yintercept = 0)+
+  stat_cor(method = "pearson")+
+  geom_smooth(method = lm)+
+  facet_wrap(~class)+
+  #labs(caption =  "cEP (n=10516)") +
+  #stat_function(fun = (function(x)log2(2*2^(x))), colour = "black")+
+  #stat_function(fun = (function(x)log2(2^(x)/2)), colour = "black")+
+  coord_fixed(ratio = 1)
+  
+```
+
+```{r Boosting_vs_promoter_activity, fig.width = 15, fig.height = 15}
+tib_allNCKlf2_v3_b3_v4 %>%
+  mutate(id2=paste0(frag2,strand2))%>%
+  mutate(id1=paste0(frag1,strand1))%>%
+  #mutate(class=paste0(substr(frag1,1,1), substr(frag2,1,1)))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  filter(class %in% c("EP", "PP", "NP","NN"))%>%
+  ggplot(aes(log2(activity_all_frag2), boost)) +
+  scale_color_gradient2(low = 'navyblue', mid='gray95', high = 'orangered', name="Activity cE (log2)", guide= guide_colourbar(barwidth = 1, barheight = 10))+
+  geom_point(size=1, alpha=0.7, aes(color=log2(activity_all_frag1))) +
+  #geom_jitter( size=1, alpha=0.7, color="black",shape = 21, aes(fill=boost)) +
+  xlab('Basal Activity Promoter (log2)') +
+  ylab('Boosting Index') +
+  ggtitle("Basal Activity Promoter vs Boosting v3 B3 v4") +
+  theme_bw(base_size=15) + 
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = (-2))+
+  stat_cor(method = "pearson")+
+  geom_smooth(method = lm)+
+  facet_wrap(~class)+
+  #labs(caption =  "cEP (n=10516)") +
+  #stat_function(fun = (function(x)log2(2*2^(x))), colour = "black")+
+  #stat_function(fun = (function(x)log2(2^(x)/2)), colour = "black")+
+  coord_fixed(ratio = 1)
+  
+```
+
+
+# Explore normalisation
+
+## Compare PPs present in Klf2 comb and NCKlf2 comb
+```{r}
+SharedPPs<-inner_join(tib_comb_NCklf2_processed_v4B3,tib_comb_klf2_processed_v4B3, by= "id")
+
+```
+
+```{r, fig.height=10, fig.width=10}
+SharedPPs%>%
+  ggplot(aes(boost_all.x, boost_all.y))+
+  geom_jitter(aes(color=log2(activity_all_frag2.x)))+
+  facet_wrap(~frag2.x)+
+  geom_abline(slope=1)+
+  ggtitle("PP shared combinations boost")
+```
+
+```{r, fig.height=10, fig.width=10}
+SharedPPs%>%
+  mutate(boostx= log2(activity_all.x/activity_all_frag2.x),
+         boosty= log2(activity_all.y/activity_all_frag2.y))%>%
+  ggplot(aes(boostx, boosty))+
+  geom_jitter(aes(color=log2(activity_all_frag2.x)))+
+  facet_wrap(~frag2.x)+
+  geom_abline(slope=1)+
+  ggtitle("PP shared combinations boost no norm")
+```
+
+```{r, fig.height=10, fig.width=10}
+SharedPPs%>%
+  ggplot(aes(log2(activity_all.x), log2(activity_all.y)))+
+  geom_jitter(aes(color=log2(activity_all_frag2.x)))+
+  facet_wrap(~frag2.x)+
+  geom_abline(slope=1)+
+  ggtitle("PP shared combinations Activities no norm")
+```
+
+```{r, fig.height=10, fig.width=10}
+SharedPPs%>%
+  ggplot(aes(log2(activity_all.x), log2(activity_all.y)))+
+  geom_jitter(aes(color=log2(activity_all_frag2.x)))+
+  #facet_wrap(~frag2.x)+
+  geom_abline(slope=1)+
+  geom_smooth(method = "lm")+
+  stat_cor(method = "pearson")+
+  ggtitle("PP shared combinations Activities, v4 no norm to empty")
+```
+
+```{r, fig.height=8, fig.width=8}
+SharedPPs%>%
+  ggplot(aes(log2(activity_all.x), log2(activity_all.y)))+
+  geom_jitter()+
+  #facet_wrap(~frag2.x)+
+  geom_abline(slope=1)+
+  geom_smooth(method = "lm")+
+  theme_bw(base_size = 15)+
+  stat_cor(method = "pearson")+
+  xlab("Activity library 1(log2)")+
+  ylab("Activity library 2 (log2)")+
+  ggtitle("PP shared combinations Activities")
+```
+
+
+
+
+
+
+
+```{r, fig.height=8, fig.width=8}
+SharedPPs%>%
+  ggplot(aes(log2(activity_all_frag2.x), log2(activity_all_frag2.y)))+
+  geom_jitter()+
+  geom_abline(slope=1)+
+  geom_smooth(method = "lm")+
+ theme_bw(base_size = 15)+
+  stat_cor(method = "pearson")+
+  xlab("Activity basal library 1(log2)")+
+  ylab("Activity basal library 2 (log2)")+
+  ggtitle("Shared Ps basal Activities")
+```
+
+```{r, fig.height=6, fig.width=8}
+SharedPPs%>%
+  ggplot(aes(log2(activity_all_frag2.x), log2(activity_all_frag2.y)))+
+  geom_jitter(aes(color=log2(activity_all_frag2.x)))+
+  geom_abline(slope=1)+
+  geom_smooth(method = "lm")+
+  stat_cor(method = "pearson")+
+  ggtitle("PP shared Basal Activities, v4 No norm to empty")
+```
+
+## Conclusion
+
+V4 normalisation without normalising to empty fragments works very well, PPs shared between libraries show very similar activities and shared basal elements also look very similar. Normalising to empty fragments is probably just introducing noise in the data because in this case the empty fragment activities of all libraries are within noise range of each other. In B1 and B2 normalising to empty fragments seemed more important.
+

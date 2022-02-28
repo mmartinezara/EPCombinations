@@ -1,0 +1,161 @@
+---
+title: "FigureS1_BoostIndexAdjusting"
+author: "MMA"
+date: "28/8/2021"
+output:
+  pdf_document:
+    fig_caption: yes
+    toc: yes
+  html_document: 
+    toc: yes
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/GitHub/EPCombinations/FiguresPaper/FigureS1/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(dplyr)
+library(GGally)  
+library(ggbeeswarm)
+
+```
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="klf2")%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+
+```
+
+
+# Boost Index version 1
+
+```{r BiasedboostIndex Distribution, fig.width=7, fig.height=10}
+  
+allKlfcombNCAdj_all%>%
+  filter(Nbasal>10)%>%
+  filter(class%in%c("EP", "NP"))%>%
+  ggplot(aes(class,boost_all))+
+  geom_violin(aes(fill=class))+
+  geom_boxplot()+
+  theme_bw(base_size = 15)
+```
+
+
+
+# Rescaled Boost indices
+
+```{r UnbiasedboostIndex_Distribution, fig.width=7, fig.height=10}
+  
+allKlfcombNCAdj_all%>%
+  filter(Nbasal>10)%>%
+  filter(class%in%c("EP", "NP"))%>%
+  ggplot(aes(class,BoostPerPmed))+
+  geom_violin(aes(fill=class))+
+  geom_boxplot()+
+  theme_bw(base_size = 15)
+```
+
+```{r , fig.width=7, fig.height=10}
+  
+allKlfcombNCAdj_all%>%
+  filter(Nbasal>10)%>%
+  filter(class%in%c("EP", "NP"))%>%
+  group_by(class)%>%
+  filter(!boost_all%in%c(NA))%>%
+  summarise(median(boost_all))
+
+allKlfcombNCAdj_all%>%
+  filter(Nbasal>10)%>%
+  filter(class%in%c("EP", "NP"))%>%
+  group_by(class)%>%
+  summarise(median(BoostPerPmed))
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+    filter(Nbasal>10)%>%
+  filter(class%in%c("EP", "NP"))%>%
+  group_by(class)%>%
+  filter(!boost%in%c(NA))%>%
+  summarise(median(boost))
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+    filter(Nbasal>10)%>%
+  filter(class%in%c("EP", "NP"))%>%
+  group_by(class)%>%
+  filter(!boost%in%c(NA))%>%
+  summarise(median(BoostPerPmed))
+```
+
+# Nr combs
+
+
+```{r , fig.width=7, fig.height=10}
+  
+allKlfcombNCAdj_all%>%
+  filter(Nbasal>10)%>%
+  filter(class%in%c("EP", "NP"))%>%
+  group_by(class)%>%
+  summarise(n())
+```
+
+```{r}
+sessionInfo()
+```
+
+

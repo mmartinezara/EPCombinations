@@ -1,0 +1,1315 @@
+---
+title: "AnalysisOnEngreitzDATA_MMA20211109"
+author: "MMA"
+date: "09/11/2021"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/FigureS6_V2/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+# Load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(ggbeeswarm)
+library(onewaytests)
+library(readr)
+library(datteRo)
+```
+
+# Load data
+
+```{r}
+ExP_counts<-read_tsv('/YOURDIR/EPCombinations/data/BergmanEtAl/ExP_residual_per_BC.txt', col_names = TRUE)
+Eseqs<-read_tsv('/YOURDIR/EPCombinations/data/BergmanEtAl/EnhancerSequencesExP.txt', col_names = TRUE)
+```
+
+
+# Explore data
+
+```{r}
+ExP_counts%>%
+  ggplot(aes(log10(rep_1),log10(rep_2)))+
+  geom_hex()+
+  stat_cor()
+
+ExP_counts%>%
+  ggplot(aes(log10(rep_1),log10(rep_3)))+
+  geom_hex()+
+  stat_cor()
+
+ExP_counts%>%
+  ggplot(aes(log10(rep_1),log10(rep_4)))+
+  geom_hex()+
+  stat_cor()
+
+ExP_counts%>%
+  ggplot(aes(log10(rep_2),log10(rep_3)))+
+  geom_hex()+
+  stat_cor()
+
+ExP_counts%>%
+  ggplot(aes(log10(rep_2),log10(rep_4)))+
+  geom_hex()+
+  stat_cor()
+
+ExP_counts%>%
+  ggplot(aes(log10(rep_3),log10(rep_4)))+
+  geom_hex()+
+  stat_cor()
+
+```
+
+
+```{r}
+ExP_counts%>%
+  group_by(enhancer,promoter)%>%
+  summarise(n=n())%>%
+  ggplot(aes(log10(n)))+
+  geom_histogram()+
+  ggtitle("Barcodes per comb")
+```
+
+
+
+```{r}
+ExP_counts%>%
+  ggplot(aes(log10(DNA)))+
+  geom_density()+
+  ggtitle("Barcode pDNA counts")
+```
+
+# Reprocess data
+
+
+## Processing v4
+
+```{r}
+# offsets are computed after combining pDNA counts, from pDNA count columns, after filtering
+auto_process_v4 <- function(tib_all, min_pdna, min_n_bc, avg_type) {
+
+  # sum pdna counts across replicates
+   tib_all    <- combine_cn(tib_all)
+
+  # remove barcodes with pDNA reads < threshold
+  tib_all    <- filter_cn(tib_all, min_pdna = min_pdna)
+
+
+  # remove barcodes of elements with < threshold distinct barcodes
+  tib_all    <- filter_barcodes(tib_all, min_n_bc = min_n_bc,  main = 'AllBC')
+
+  # compute offsets
+  offsets_all <- tib_all %>%
+    dplyr::select(contains('dna_counts')) %>%
+    colSums() / 1e6
+  names(offsets_all) <- names(offsets_all) %>%
+    str_replace('_counts', '')
+  
+  message('norm factors', offsets_all)
+  
+    
+  # normalize to library sizes
+  tib_all    <- normalize_counts(tib_all, offsets_all)
+
+  # compute activities and summarize barcodes
+  tib_all    <- compute_activities(tib_all)
+
+  # summarize activities (weighted average)
+  #tib_all    <- summarize_barcodes(tib_all, type = avg_type)
+
+#  if(missing(signal_t)) {
+
+    # model combinatorial activity distributions
+ #   signal_t     <- learn_min_activity(tib_comb)
+
+ # }
+
+ # # compute cooperativity
+#  tib_comb_all <- compute_cooperativity(tib_comb, tib_basal, signal_t = signal_t, remove_inactive = FALSE)
+ # tib_comb     <- compute_cooperativity(tib_comb, tib_basal, signal_t = signal_t, remove_inactive = TRUE)
+
+  # add metadata
+ # tib_basal    <- add_metadata(tib_basal, tib_dat = tib_dat, type = 'basal')
+#  tib_comb     <- add_metadata(tib_comb, tib_dat = tib_dat, type = 'comb')
+ # tib_comb_all <- add_metadata(tib_comb_all, tib_dat = tib_dat, type = 'comb')
+
+  # return list of tibs
+  return(tib_all)
+
+}
+```
+
+
+```{r set params}
+# min number of barcodes
+min_n_bc <- 5
+# min copy number
+min_pdna <- 8
+
+
+# load genomic coordinates of DAT library
+#tib_frag_coord <- read_dat_design('/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/designs/fc180419_dat_tfcp2l1.bed')
+```
+
+```{r}
+ExP_counts_reshaped<-ExP_counts%>%
+  dplyr::rename(barcode=BC, frag2=promoter, frag1=enhancer, pdna_counts_1=DNA,cdna_counts_br1=rep_1, cdna_counts_br2=rep_2, cdna_counts_br3=rep_3, cdna_counts_br4=rep_4)%>%
+  select(1:8)%>%
+  mutate(strand1="+",strand2="+", id= paste0(frag1, strand1, frag2,strand2))
+
+```
+
+
+
+```{r autoprocess tibs}
+
+# change from previous versions, now we process first barcode aggregation and activities computations, in a later step we calculate boosting.
+ExP_counts_reshaped_processed_v4        <- auto_process_v4( ExP_counts_reshaped, 
+                               min_pdna  = min_pdna, 
+                               min_n_bc  = min_n_bc, 
+                               avg_type  = 'avg')
+
+```
+
+
+```{r}
+
+#ExP_counts_reshaped_processed_v4%>%
+#      dplyr::select(starts_with('activity_'))
+summarize_barcodes <- function(tib, type = 'wa') {
+
+  # stop if type not 'wa'/'avg'
+  if(!type %in% c('wa', 'avg'))
+    stop('type should be equal to wa for a weighted average, or to avg for an arithmetic average')
+
+  # aux function that works on a nested tibble ($data slot)
+  get_summarized_vals <- function(dat, type) {
+
+    # extract pDNA counts
+    pdna_counts <- dat[['pdna_counts']]
+    denom       <- sum(pdna_counts)
+
+    # extract activity values
+    dat <- dat %>%
+      dplyr::select(starts_with('activity_'))
+
+    if(type == 'wa') {
+
+      # summarize barcode activities using a weighted average (w = pdna counts)
+      vec_summarized <- colSums(dat * pdna_counts) / denom
+
+    }
+
+    else {
+
+      # summarize barcode activities using an arithmetic average
+      vec_summarized <- colMeans(dat)
+
+    }
+
+    # take geom mean of activities
+    vec_summarized[['activity_all']] <- prod(vec_summarized) ^ (1 / length(vec_summarized))
+
+    return(vec_summarized)
+  }
+
+  # nest input tibble by element identity
+  tib_nested <- tib %>%
+    group_by(id, frag1, strand1, frag2, strand2) %>%
+    nest()
+
+  tib_summarized <- purrr::map(tib_nested$data, get_summarized_vals, type = type) %>%
+    do.call(what = 'rbind') %>%
+    as_data_frame()
+
+  tib_nested %>%
+    # drop data slot = unnest
+    dplyr::select(-data) %>%
+    bind_cols(tib_summarized)
+}
+#ExP_counts_reshaped_processed_v4%>%
+#  summarize_barcodes(type = 'avg')
+```
+
+
+```{r}
+
+ExP_counts_reshaped_processed_v4sum<-ExP_counts_reshaped_processed_v4%>%
+  group_by(id, frag1, strand1, frag2, strand2) %>%
+  dplyr::summarise(activity_br1=mean(activity_br1), activity_br2=mean(activity_br2), activity_br3=mean(activity_br3),activity_br4=mean(activity_br4))%>%
+  mutate(activity_all=(activity_br1*activity_br2*activity_br3*activity_br4) ^ (1 / 4))
+
+#adjust by med EP per promoter
+BasalMedianExP<-ExP_counts_reshaped_processed_v4sum %>%
+  #filter(class=="EP")%>%
+  group_by(frag2)%>%
+  summarise(Basal_median=median(activity_all), Nbasal=dplyr::n())
+
+ExP_counts_reshaped_processed_v4sumAdj_all<-left_join(ExP_counts_reshaped_processed_v4sum,BasalMedianExP, by="frag2")%>%
+  mutate(BoostPerPmed=log2(activity_all/Basal_median))
+
+```
+
+```{r}
+rm(ExP_counts)
+rm(ExP_counts_reshaped)
+rm(ExP_counts_reshaped_processed_v4)
+```
+
+
+
+## check data
+```{r}
+GenomicBAcgrounds<-Eseqs%>%
+  filter(randomBG==TRUE)%>%
+  select(fragment)%>%
+  as.vector
+```
+
+
+
+```{r, fig.height=7,fig.width=7}
+ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  filter(Nbasal>10)%>%
+  mutate(Type=ifelse(grepl('scramble',frag1), "scrambled",ifelse(frag1%in%GenomicBAcgrounds$fragment, "GenomicBackground", "enhancer")))%>%
+  ggplot(aes(Type,BoostPerPmed))+
+  geom_violin(aes(fill=Type))+
+  geom_boxplot()+
+  ggtitle("ExP adjusted boost indices")+
+  ylab("Boost index (log2)")+
+  theme_bw(base_size = 12)
+
+
+```
+
+```{r, fig.height=15,fig.width=15}
+ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  filter(Nbasal>10)%>%
+  #filter(class%in%c("EP"))%>%
+  ggplot(aes(log2(Basal_median), BoostPerPmed))+
+  geom_bin2d(binwidth=c(0.25,0.25))+
+  ggtitle("Activity vs Boost ")+
+  theme_bw(base_size = 20)+
+  ylab("Boost index(log2)")+
+    xlab("Activity Promoter (log2)")+
+  geom_smooth(method = "lm")+
+  stat_cor()
+```
+
+
+
+## Downsample
+
+```{r}
+set.seed(233)
+Es233<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(20)
+Ps20<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+```
+
+## Anova (welch)
+
+```{r, fig.height==10, fig.width=20}
+ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233$frag1)%>%
+  filter(frag2%in%Ps20$frag2)%>%
+  group_by(frag1, frag2)%>%
+  ggplot(aes(frag2,BoostPerPmed))+
+  geom_quasirandom()+
+  geom_boxplot()
+```
+
+
+```{r}
+
+
+EsFiltering<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233$frag1)%>%
+  filter(frag2%in%Ps20$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233$frag1)%>%
+  filter(frag2%in%Ps20$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+
+WelchTestExPBoost<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering$frag1)) {
+  wFtestExP<-ForWelchExPBoost%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost<-WelchTestExPBoost%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+```
+
+
+```{r}
+WelchTestExPBoost%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()
+
+```
+```{r}
+
+
+WelchTestExPBoost%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()
+```
+
+
+```{r BarplotVariancepvalue2_ExP, fig.height=15, fig.width=9}
+
+VarPErE_AvgOr_onlyVar<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233$frag1)%>%
+  filter(frag2%in%Ps20$frag2)%>%
+  ungroup()%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>% 
+  group_by(frag2,frag1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed))%>%
+  group_by(frag1)%>%
+  summarise(variance=var(BoostPerPmed), nsize=dplyr::n(), meanboost=mean(BoostPerPmed))
+
+
+ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233$frag1)%>%
+  filter(frag2%in%Ps20$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+  group_by(frag1, frag2)%>%
+  summarise(BoostPerPmedAvgOrien=mean(BoostPerPmed))%>%
+  filter(frag1%in%WelchTestExPBoost$frag1)%>%
+ left_join(WelchTestExPBoost%>%mutate(CorrPvalue=p.adjust(pvalue, "BH")), by=c("frag1"))%>%
+  left_join(VarPErE_AvgOr_onlyVar, by=c("frag1"))%>%
+    mutate(frag1=sapply(str_split(frag1, "_"), function(x) x[1]))%>% 
+  ggplot(aes(reorder(frag1, meanboost),BoostPerPmedAvgOrien, colour=CorrPvalue<0.001))+
+  geom_hline(yintercept = 0, alpha=0.4)+
+  geom_quasirandom(size=1.2, varwidth = TRUE, alpha=0.7)+
+  stat_summary(fun.y = mean, width = 0.5, linetype = "solid", colour="black", geom = "crossbar")+
+  #geom_bar(stat="identity")+
+  #geom_crossbar( aes(x=reorder(frag1, meanboost),y=meanboost, ymin=meanboost-sqrt(variance), ymax=meanboost+sqrt(variance), colour=CorrPvalue<0.05), width=0.4, alpha=0.4, size=0.5)+
+  #geom_crossbar( aes(x=reorder(frag1, meanboost),y=meanboost, ymin=meanboost, ymax=meanboost), colour="black", width=0.4, alpha=1, size=0.5)+
+  #geom_point(aes(reorder(frag1, meanboost),meanboost, colour=CorrPvalue<0.05))+
+  theme_bw(base_size = 15)+
+  labs(caption = "154 cCREs K562 ExP data (combinations>5)")+
+  coord_flip()
+
+```
+
+
+## Downsample2
+
+```{r}
+set.seed(2021)
+Es233.2<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(2001)
+Ps20.2<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+```
+
+```{r}
+
+
+EsFiltering.2<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.2$frag1)%>%
+  filter(frag2%in%Ps20.2$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.2<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.2$frag1)%>%
+  filter(frag2%in%Ps20.2$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+
+WelchTestExPBoost.2<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.2$frag1)) {
+  wFtestExP<-ForWelchExPBoost.2%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.2<-WelchTestExPBoost.2%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+```
+
+
+```{r}
+WelchTestExPBoost.2%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()
+
+```
+
+
+## Downsample3
+
+```{r}
+set.seed(5632)
+Es233.3<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(7462)
+Ps20.3<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+```
+
+```{r}
+
+
+EsFiltering.3<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.3$frag1)%>%
+  filter(frag2%in%Ps20.3$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.3<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.3$frag1)%>%
+  filter(frag2%in%Ps20.3$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+ForWelchExPBoost.3.2<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.3$frag1)%>%
+  filter(frag2%in%Ps20.3$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed3), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+
+WelchTestExPBoost.3<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.3$frag1)) {
+  wFtestExP<-ForWelchExPBoost.3%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.3<-WelchTestExPBoost.3%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+WelchTestExPBoost.3.2<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.3$frag1)) {
+  wFtestExP<-ForWelchExPBoost.3.2%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.3.2<-WelchTestExPBoost.3.2%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+```
+
+
+```{r}
+WelchTestExPBoost.3%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()
+
+
+WelchTestExPBoost.3.2%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()
+```
+
+```{r}
+
+
+WelchTestExPBoost.3%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()
+
+WelchTestExPBoost.3.2%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()
+
+```
+
+```{r BarplotVariancepvalue2, fig.height=15, fig.width=10}
+
+VarPErE_AvgOr_onlyVar.3<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.3$frag1)%>%
+  filter(frag2%in%Ps20.3$frag2)%>%
+  ungroup()%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>% 
+  group_by(frag2,frag1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed))%>%
+  group_by(frag1)%>%
+  summarise(variance=var(BoostPerPmed), nsize=dplyr::n(), meanboost=mean(BoostPerPmed))
+
+ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.3$frag1)%>%
+  filter(frag2%in%Ps20.3$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+  group_by(frag1, frag2)%>%
+  summarise(BoostPerPmedAvgOrien=mean(BoostPerPmed))%>%
+  filter(frag1%in%WelchTestExPBoost.3$frag1)%>%
+ left_join(WelchTestExPBoost.3%>%mutate(CorrPvalue=p.adjust(pvalue, "BH")), by=c("frag1"))%>%
+  left_join(VarPErE_AvgOr_onlyVar.3, by=c("frag1"))%>%
+    filter(nsize>5)%>%
+    mutate(frag1=sapply(str_split(frag1, "_"), function(x) x[1]))%>% 
+  ggplot(aes(reorder(frag1, meanboost),BoostPerPmedAvgOrien, colour=CorrPvalue<0.001))+
+  geom_hline(yintercept = 0, alpha=0.4)+
+  geom_quasirandom(size=1.2, varwidth = TRUE, alpha=0.7)+
+  stat_summary(fun.y = mean, width = 0.5, linetype = "solid", colour="black", geom = "crossbar")+
+  #geom_bar(stat="identity")+
+  #geom_crossbar( aes(x=reorder(frag1, meanboost),y=meanboost, ymin=meanboost-sqrt(variance), ymax=meanboost+sqrt(variance), colour=CorrPvalue<0.05), width=0.4, alpha=0.4, size=0.5)+
+  #geom_crossbar( aes(x=reorder(frag1, meanboost),y=meanboost, ymin=meanboost, ymax=meanboost), colour="black", width=0.4, alpha=1, size=0.5)+
+  #geom_point(aes(reorder(frag1, meanboost),meanboost, colour=CorrPvalue<0.05))+ç
+  theme_bw(base_size = 20)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  xlab("Enhancer")+
+  ylab("Boost index (log2)")+
+coord_flip()+  labs(caption = "115 cCREs K562 data (combinations>5)")
+
+VarPErE_AvgOr_onlyVar.3%>%
+  filter(nsize>5)
+
+```
+
+
+## Downsample 4-10
+
+```{r}
+#4
+set.seed(2346)
+Es233.4<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(67834)
+Ps20.4<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+#5
+set.seed(01835)
+Es233.5<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(09374)
+Ps20.5<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+#6
+set.seed(901734)
+Es233.6<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(791364)
+Ps20.6<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+#7
+set.seed(613409)
+Es233.7<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(512089)
+Ps20.7<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+#8
+set.seed(08124)
+Es233.8<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(127640)
+Ps20.8<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+
+#9
+set.seed(6751230)
+Es233.9<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(127830456)
+Ps20.9<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+
+#10
+set.seed(77934)
+Es233.10<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag1)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(233)%>%
+  as.tibble()%>%
+  dplyr::rename(frag1=value)
+
+
+set.seed(939784)
+Ps20.10<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+  ungroup()%>%
+  dplyr::select(frag2)%>%
+  unique()%>%
+  as_vector()%>%
+  sample(20)%>%
+  as.tibble()%>%
+  dplyr::rename(frag2=value)
+```
+
+
+```{r}
+#Filtering 4
+EsFiltering.4<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.4$frag1)%>%
+  filter(frag2%in%Ps20.4$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.4<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.4$frag1)%>%
+  filter(frag2%in%Ps20.4$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+#Filtering 5
+EsFiltering.5<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.5$frag1)%>%
+  filter(frag2%in%Ps20.5$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.5<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.5$frag1)%>%
+  filter(frag2%in%Ps20.5$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+#Filtering 6
+EsFiltering.6<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.6$frag1)%>%
+  filter(frag2%in%Ps20.6$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.6<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.6$frag1)%>%
+  filter(frag2%in%Ps20.6$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+#Filtering 7
+EsFiltering.7<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.7$frag1)%>%
+  filter(frag2%in%Ps20.7$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.7<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.7$frag1)%>%
+  filter(frag2%in%Ps20.7$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+#Filtering 8
+EsFiltering.8<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.8$frag1)%>%
+  filter(frag2%in%Ps20.8$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.8<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.8$frag1)%>%
+  filter(frag2%in%Ps20.8$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+#Filtering 9
+EsFiltering.9<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.9$frag1)%>%
+  filter(frag2%in%Ps20.9$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.9<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.9$frag1)%>%
+  filter(frag2%in%Ps20.9$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+#Filtering 10
+EsFiltering.10<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.10$frag1)%>%
+  filter(frag2%in%Ps20.10$frag2)%>%
+  group_by(frag1)%>%
+  summarise(n=dplyr::n())%>% filter(n>5)
+  
+  
+
+ForWelchExPBoost.10<-ExP_counts_reshaped_processed_v4sumAdj_all%>%
+    filter(frag1%in%Es233.10$frag1)%>%
+  filter(frag2%in%Ps20.10$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(BoostPerPmed4=log2(activity_br4/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3, BoostPerPmed4), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(!BoostperPmedall%in%c(NA,NaN,Inf,-Inf))
+
+```
+
+```{r}
+WelchTestExPBoost.4<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.4$frag1)) {
+  wFtestExP<-ForWelchExPBoost.4%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.4<-WelchTestExPBoost.4%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+WelchTestExPBoost.5<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.5$frag1)) {
+  wFtestExP<-ForWelchExPBoost.5%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.5<-WelchTestExPBoost.5%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+WelchTestExPBoost.6<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.6$frag1)) {
+  wFtestExP<-ForWelchExPBoost.6%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.6<-WelchTestExPBoost.6%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+WelchTestExPBoost.7<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.7$frag1)) {
+  wFtestExP<-ForWelchExPBoost.7%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.7<-WelchTestExPBoost.7%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+WelchTestExPBoost.8<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.8$frag1)) {
+  wFtestExP<-ForWelchExPBoost.8%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.8<-WelchTestExPBoost.8%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+WelchTestExPBoost.9<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.9$frag1)) {
+  wFtestExP<-ForWelchExPBoost.9%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.9<-WelchTestExPBoost.9%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+
+WelchTestExPBoost.10<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+n=0
+
+for (i in unique(EsFiltering.10$frag1)) {
+  wFtestExP<-ForWelchExPBoost.10%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestExPBoost.10<-WelchTestExPBoost.10%>%
+    add_row(frag1=i, pvalue=wFtestExP$p.value, fstatistic=wFtestExP$statistic, df1=wFtestExP$parameter[1], df2=wFtestExP$parameter[2])
+  n=n+1
+  print(n)
+}
+```
+
+```{r}
+WelchTestExPBoost.4%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()+
+  ggtitle("subsample4")
+
+WelchTestExPBoost.5%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()+
+  ggtitle("subsample5")
+
+WelchTestExPBoost.6%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()+
+  ggtitle("subsample6")
+
+WelchTestExPBoost.7%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()+
+  ggtitle("subsample7")
+
+WelchTestExPBoost.8%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()+
+  ggtitle("subsample8")
+
+WelchTestExPBoost.9%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()+
+  ggtitle("subsample9")
+
+WelchTestExPBoost.10%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()+
+  ggtitle("subsample10")
+```
+
+```{r}
+
+WelchTestExPBoost.4%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()+
+  ggtitle("subsample4")
+
+WelchTestExPBoost.5%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()+
+  ggtitle("subsample5")
+
+WelchTestExPBoost.6%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()+
+  ggtitle("subsample6")
+
+WelchTestExPBoost.7%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()+
+  ggtitle("subsample7")
+
+WelchTestExPBoost.8%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()+
+  ggtitle("subsample8")
+
+WelchTestExPBoost.9%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()+
+  ggtitle("subsample9")
+
+WelchTestExPBoost.10%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()+
+  ggtitle("subsample10")
+
+```
+
+# Summary 
+
+```{r summary_plot, fig.height=5, fig.width=5}
+bind_rows(
+WelchTestExPBoost%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.2%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.3%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.4%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.5%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.6%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.7%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.8%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.9%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.10%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")))%>%
+  filter(!is.na(CorrPvalue))%>%
+    mutate(Axis="cCREs")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.001))+
+  theme_bw()+
+  ggtitle("Pooled subsamples")+
+  labs(caption = "1405 subsampled cCREs K562 data (combinations>5)")
+
+bind_rows(
+WelchTestExPBoost%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.2%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.3%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.4%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.5%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.6%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.7%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.8%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.9%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.10%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")))%>%
+  filter(!is.na(CorrPvalue))%>%
+    mutate(Signif=ifelse(CorrPvalue>0.001, 0, 1))%>%
+  summarise(percSignif=(sum(Signif)/dplyr::n()*100), dplyr::n())
+
+```
+
+```{r summary_plot_Bars, fig.height=5, fig.width=5}
+bind_rows(
+WelchTestExPBoost%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.2%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.3%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.4%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.5%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.6%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.7%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.8%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.9%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")),
+
+WelchTestExPBoost.10%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH")))%>%
+  filter(!is.na(CorrPvalue))%>%
+    mutate(Axis="enhancers")%>%
+  mutate(Classification=ifelse(CorrPvalue<0.01, "significant", "NonSignificant"))%>%
+  ggplot(aes(Classification))+
+  geom_bar(aes(fill=Classification))+
+  theme_bw()+
+  ggtitle("Pooled subsamples")
+  
+
+```

@@ -1,0 +1,112 @@
+---
+title: "MMA20210323_Tfcp2l1DataRescaling"
+author: "MMA"
+date: "23/3/2021"
+output: html_document
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE, 
+                      message    = FALSE, 
+                      warning    = FALSE, 
+                      cache      = TRUE,
+                      autodep    = TRUE,
+                      fig.align  = 'center', 
+                      fig.width  = 6, 
+                      fig.height = 6)
+```
+
+```{r libs and fun}
+library(tidyverse)
+library(here)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(gridExtra)
+library(pander)
+library(cowplot)
+library(circlize)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+library(heatmaply)
+library(scales)
+
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering visualization
+library(dendextend) # for comparing two dendrograms
+
+```
+# Intro
+
+* Normalise to Global effect of Enhancers.
+* Normalise to per Promoter effect of Enhancers.
+
+# Load data
+
+```{r}
+# Load processed data for upstream and downstream Klf2 and Nanog
+load("~/mydata/GitLab/epmatrix/data/MMA20201010_epsure_tibs_tfcp2l1_V3_V4.RData")
+
+```
+
+```{r}
+tib_comb_tfcp2l_processed_v4B1%>%
+  filter(frag2=="eempty")
+```
+
+
+```{r}
+#calculate general EP boost deviation 
+tib_comb_tfcp2l_processed_v4B1%>%
+  filter(!boost%in%c(Inf,-Inf, NA))%>%
+  group_by(class)%>%
+  summarise(median(boost), mean(boost))
+
+
+#adjust
+tib_comb_tfcp2l_processed_v4B1_adj<- tib_comb_tfcp2l_processed_v4B1%>%
+  #filter(!class=="ee")%>%
+  mutate(adjBoostmedEP=boost+0.20)
+#adjust by med EP per promoter
+BasalMedianUPtfcp2l1<-tib_comb_tfcp2l_processed_v4B1 %>%
+  filter(class=="EP")%>%
+  group_by(id2)%>%
+  summarise(Basal_median=median(activity_all), Nbasal=n())
+
+allcomb_tfcp2Adj_all<-left_join(tib_comb_tfcp2l_processed_v4B1_adj,BasalMedianUPtfcp2l1, by="id2")%>%
+  mutate(BoostPerPmed=log2(activity_all/Basal_median))
+
+```
+
+
+```{r, fig.height=7,fig.width=15}
+allcomb_tfcp2Adj_all%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,adjBoostmedEP))+
+  geom_violin(aes(fill=id2))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 3. General EP effect. ")+
+  theme_bw(base_size = 12)
+```
+
+```{r, fig.height=7,fig.width=15}
+allcomb_tfcp2Adj_all%>%
+  filter(Nbasal>10)%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,BoostPerPmed))+
+  geom_violin(aes(fill=id2))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 4. Per P EP effect. EPs")+
+  theme_bw(base_size = 12)
+```
+
+# Save normalisation
+```{r}
+allKlfcombNCAdj_all
+
+save(list = c('allcomb_tfcp2Adj_all' ),
+     file = '~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```

@@ -1,0 +1,414 @@
+---
+title: "HousekeepingGenesAnalysis_MMA20210930"
+author: "MMA"
+date: "30/09/2021"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/Fig5HK/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(ggbeeswarm)
+library(onewaytests)
+```
+
+# Load HK data
+```{r}
+load('~/mydata/GitLab/epmatrix/data/Housekeeping/Housekeeping_Genes_Mouse.RData')
+## Source = 
+```
+
+```{r}
+#FindHK genes Klf2
+
+Mouse_HK_genes%>%
+  filter(Chromosome_scaffold=="8")%>%
+  filter(`Transcript start`>71877482 &`Transcript start`<72766609)
+  
+  HK_Promoters_Klf2<-
+    tibble(Gene=c("1700030K09Rik","Ap1m1", "Cherp", "Eps15l1", "Fam32a", "Med26", "Rab8a", "Sin3b", "Slc35e1", "Smim7"), frag2=c("P018_Klf2", "P014_Klf2", "P019_Klf2", "P017_Klf2", "P013_Klf2", "P021_Klf2", "P009_Klf2", "P025_Klf2", "P020_Klf2", "P022_Klf2"))
+```
+
+```{r}
+#FindHK genes Nanog
+
+Mouse_HK_genes%>%
+  filter(Chromosome_scaffold=="6")%>%
+  filter(`Transcript start`>122294784 &`Transcript start`<123364798)
+  
+## No HK genes in the Nanog locus
+```
+
+```{r}
+#FindHK genes Tfcp2l1
+
+Mouse_HK_genes%>%
+  filter(Chromosome_scaffold=="1")%>%
+  filter(`Transcript start`>117724799 &`Transcript start`<120617685)
+  
+  HK_Promoters_Tfcp2l1<-
+    tibble(Gene=c("Tsn", "Tmem177", "Nifk"), frag2=c("P006_Tfcp2l1", "P024_Tfcp2l1", "P007_Tfcp2l1"))
+```
+
+
+```{r}
+#merge data
+HK_Promoters<-bind_rows(HK_Promoters_Klf2,HK_Promoters_Tfcp2l1)
+HK_Promoters
+```
+# load EP data
+
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+## Make tib with the 3 libraries
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="Klf2")%>%
+  mutate(id1=paste0(frag1,strand1))%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+```
+
+# Analysis
+
+```{r BasalActivity_HKPs, fig.width=7, fig.height=7}
+
+all_comball%>%
+  filter(class=="EP", strand2=="+")%>%
+  mutate(id2  =  paste0(frag2,"_",DAT))%>%
+ mutate(HK = ifelse(id2 %in% HK_Promoters$frag2, TRUE, FALSE))%>%
+  select(activity_all_frag2, HK, id2)%>%
+  distinct()%>%
+  group_by(HK)%>%
+  summarise(dplyr::n())
+
+all_comball%>%
+  filter(class=="EP", strand2=="+")%>%
+  mutate(id2  =  paste0(frag2,"_",DAT))%>%
+ mutate(HK = ifelse(id2 %in% HK_Promoters$frag2, TRUE, FALSE))%>%
+  select(activity_all_frag2, HK, id2)%>%
+  distinct()%>%
+  ggplot(aes( HK, log2(activity_all_frag2)))+
+  geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.1)+
+  geom_boxplot(alpha=0.5)+ stat_compare_means(method = "t.test")+
+  theme_bw()
+  
+```
+
+## check promoters in Downstream assay
+
+```{r}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class=="EP", strand2=="+")%>%
+  mutate(id2  =  paste0(frag2,"_","Klf2"))%>%
+ mutate(HK = ifelse(id2 %in% HK_Promoters$frag2, TRUE, FALSE))%>%
+ select(activity_frag2_all, HK, id2)%>%
+distinct()%>%
+  group_by(HK)%>%
+  summarise(dplyr::n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class=="EP", strand2=="+")%>%
+  mutate(id2  =  paste0(frag2,"_","Klf2"))%>%
+ mutate(HK = ifelse(id2 %in% HK_Promoters$frag2, TRUE, FALSE))%>%
+ select(activity_frag2_all, HK, id2)%>%
+distinct()
+
+  
+```
+
+
+## Klf2 matrix segregated
+
+## Selectivity analysis without HK promoters
+
+## Welch test highly active promoters
+
+```{r include=FALSE}
+
+
+
+VarPErE_AvgOr_between_NonHK<-all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+    mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+    filter(!frag2%in% HK_Promoters$frag2)%>%
+  group_by(frag1, id2)%>%
+  summarise(BoostPerPmedAvgOr=mean(BoostPerPmed))%>%
+  ungroup()%>%
+  group_by(frag1)%>%
+  summarise(variance=var(BoostPerPmedAvgOr), n=dplyr::n())%>%
+  #left_join(VarPErE_AvgOr_within)%>%
+  filter(n>5)
+
+
+## Alternative F tests to ANOVA, Brown and Forsythe, and Welch F test. Both are used when data is heterocedastic as it is our case.
+
+forWelch_NonHK<-all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+    mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  filter(!frag2%in% HK_Promoters$frag2)%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(frag1%in%VarPErE_AvgOr_between_NonHK$frag1)
+
+
+WelchTestEnhancers_NonHK<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+
+for (i in unique(forWelch_NonHK$frag1)) {
+  wFtest<-forWelch_NonHK%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestEnhancers_NonHK<-WelchTestEnhancers_NonHK%>%
+    add_row(frag1=i, pvalue=wFtest$p.value, fstatistic=wFtest$statistic, df1=wFtest$parameter[1], df2=wFtest$parameter[2])
+}
+
+```
+
+```{r  WelchTest_NonHK, fig.width=7, fig.height=5}
+
+VarPErE_AvgOr_onlyVar_NonHK<-all_comball%>% 
+  ungroup()%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+    mutate(id1=paste0(id1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+    mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!frag2%in% HK_Promoters$frag2)%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>% 
+  group_by(id2,frag1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed),activity_all_frag2=mean(activity_all_frag2),activity_all_frag1=mean(activity_all_frag1),class=unique(class))%>%
+  group_by(frag1)%>%
+  summarise(variance=var(BoostPerPmed), nsize=dplyr::n(), meanboost=mean(BoostPerPmed))
+
+#VarPErE_AvgOr_onlyVar<-VarPErE_AvgOr_between%>%dplyr::select(variance, frag1)
+
+
+WelchTestEnhancers_NonHK%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  left_join(VarPErE_AvgOr_onlyVar_NonHK, by=c("frag1"))%>%
+  ggplot(aes(meanboost, log10(fstatistic), color=CorrPvalue<0.05))+
+  #geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.05))+
+  geom_point(aes(size=nsize), alpha=0.5)+
+  theme_bw()+
+  labs(caption = "221 cRE (combinations>5)")
+
+
+
+
+
+```
+
+
+```{r }
+WelchTestEnhancers_NonHK%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(significant=ifelse(CorrPvalue<0.05,1,0))%>%
+  filter(!is.na(significant))%>%
+  summarise(n=dplyr::n(), PercSig=sum(significant)/n, nsignif=sum(significant))
+```
+
+
+## auto/betweencorrelation analysis
+
+```{r}
+all_comball_plusAVG<-all_comball %>%
+  mutate(frag1 = paste0(frag1,"_",  DAT),
+         id1   = paste0(frag1),
+         frag2 = paste0(frag2,"_", DAT),
+         id2  =  paste0(frag2),
+         id   =  paste0(id1, id2))%>%
+  filter(Nbasal>10)%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  dplyr::filter(!BoostPerPmed %in% c(NA,Inf,-Inf,NaN))%>%
+  group_by(frag1, frag2, id1, id2, id, class, DAT)%>%
+  summarise(BoostPerPmedAvgOrien=mean(BoostPerPmed), RawBoostAvgOrien=mean(boost_all))
+  
+
+```
+## Convert to matrices
+
+```{r}
+tibToMat <- function(tib, var) {
+  mat <- acast(tib, id2 ~ id1, value.var = var) %>% 
+    as.matrix
+  return(mat)
+}
+```
+
+### Klf2
+```{r PairwiseCorrPs, fig.width=7, fig.height=7}
+
+# Downstream matrix adjusted per P
+
+matSplit_Resc_KLf2 <- all_comball_plusAVG %>%
+  filter(DAT=="Klf2") %>%
+   #mutate(id1=paste0(frag1))%>%
+  #mutate(id2=paste0(frag2))%>%
+  mutate(boost=BoostPerPmedAvgOrien)%>%
+   mutate(HK = ifelse(frag2 %in% HK_Promoters$frag2, "Yes", "No"))%>%
+  arrange(HK)%>%
+  filter(!boost%in%c(-Inf, Inf,NA))%>%
+  tibToMat( var = 'boost')
+
+#Non housekeeping Promoters
+rownames(matSplit_Resc_KLf2)[!rownames(matSplit_Resc_KLf2)%in%HK_Promoters$frag2]
+
+matSplit_Resc_KLf2Ordered<-matSplit_Resc_KLf2[c("P018_Klf2",  "P014_Klf2",  "P019_Klf2", "P017_Klf2",    "P013_Klf2",    "P021_Klf2",    "P009_Klf2",    "P025_Klf2",    "P022_Klf2",  "P001_Klf2", "P002_Klf2", "P003_Klf2", "P004_Klf2", "P005_Klf2", "P007_Klf2", "P008_Klf2", "P010_Klf2", "P011_Klf2", "P012_Klf2", "P016_Klf2", "P023_Klf2", "P024_Klf2"),] %>%
+  t()
+
+matSplit_Resc_KLf2_NonHK <- all_comball_plusAVG %>%
+  filter(DAT=="Klf2") %>%
+   #mutate(id1=paste0(frag1))%>%
+  #mutate(id2=paste0(frag2))%>%
+     mutate(HK = ifelse(frag2 %in% HK_Promoters$frag2, "Yes", "No"))%>%
+  arrange(HK)%>%
+    filter(!frag2%in% HK_Promoters$frag2)%>%
+  mutate(boost=BoostPerPmedAvgOrien)%>%
+  filter(!boost%in%c(-Inf, Inf,NA))%>%
+  tibToMat( var = 'boost')%>%
+  t()
+
+matSplit_Resc_KLf2_HK <- all_comball_plusAVG %>%
+  filter(DAT=="Klf2") %>%
+   #mutate(id1=paste0(frag1))%>%
+  #mutate(id2=paste0(frag2))%>%   
+  mutate(HK = ifelse(frag2 %in% HK_Promoters$frag2, "Yes", "No"))%>%
+  arrange(HK)%>%
+    filter(frag2%in% HK_Promoters$frag2)%>%
+  mutate(boost=BoostPerPmedAvgOrien)%>%
+  filter(!boost%in%c(-Inf, Inf,NA))%>%
+  tibToMat( var = 'boost')%>%
+  t()
+
+matSplit_Resc_KLf2Ordered
+
+#histograms
+hist(cor(matSplit_Resc_KLf2Ordered, use = "pairwise.complete.obs")[! cor(matSplit_Resc_KLf2, use = "pairwise.complete.obs") %in% c(NA,1,-1)],breaks = 30)
+
+hist(cor(matSplit_Resc_KLf2_NonHK, use = "pairwise.complete.obs")[! cor(matSplit_Resc_KLf2_NonHK, use = "pairwise.complete.obs") %in% c(NA,1,-1)],breaks = 30)
+
+hist(cor(matSplit_Resc_KLf2_HK, use = "pairwise.complete.obs")[! cor(matSplit_Resc_KLf2_HK, use = "pairwise.complete.obs") %in% c(NA,1,-1)],breaks = 30)
+
+ggplot()+
+  geom_density(aes(cor(matSplit_Resc_KLf2_HK, use = "pairwise.complete.obs")[! cor(matSplit_Resc_KLf2_HK, use = "pairwise.complete.obs") %in% c(NA,1,-1)]), fill="Blue", alpha=0.5)+
+  geom_density(aes(cor(matSplit_Resc_KLf2_NonHK, use = "pairwise.complete.obs")[! cor(matSplit_Resc_KLf2_NonHK, use = "pairwise.complete.obs") %in% c(NA,1,-1)]), fill="Red", alpha=0.5)+
+  geom_density(aes(cor(matSplit_Resc_KLf2Ordered, use = "pairwise.complete.obs")[1:9, 10:22][! cor(matSplit_Resc_KLf2, use = "pairwise.complete.obs")[1:9, 10:22] %in% c(NA,1,-1)]), fill="grey", alpha=0.5)+
+  geom_vline(xintercept=median(cor(matSplit_Resc_KLf2_HK, use = "pairwise.complete.obs")[! cor(matSplit_Resc_KLf2_HK, use = "pairwise.complete.obs") %in% c(NA,1,-1)]), size=1.5, color="Blue", alpha=0.5)+
+  geom_vline(xintercept=median(cor(matSplit_Resc_KLf2_NonHK, use = "pairwise.complete.obs")[! cor(matSplit_Resc_KLf2_NonHK, use = "pairwise.complete.obs") %in% c(NA,1,-1)]), size=1.5, color="red", alpha=0.5)+
+  geom_vline(xintercept=median(cor(matSplit_Resc_KLf2Ordered, use = "pairwise.complete.obs")[1:9, 10:22][! cor(matSplit_Resc_KLf2Ordered, use = "pairwise.complete.obs")[1:9, 10:22] %in% c(NA,1,-1)]), size=1.5, color="grey", alpha=0.5)+
+  theme_bw()
+
+
+print(cor(matSplit_Resc_KLf2, use = "pairwise.complete.obs"))
+```
+
+
+```{r CLuster_HousekeepingSmall, fig.width=10, fig.height=7}
+
+matSplit_Resc_KLf2Filt<-matSplit_Resc_KLf2[rowSums(!is.na(matSplit_Resc_KLf2))>10,colSums(!is.na(matSplit_Resc_KLf2))>18][,-c(4)]
+
+
+ggheatmap(matSplit_Resc_KLf2Filt 
+          ,seriate = 'OLO', 
+          orderRow=T,
+          xlab = 'Query', 
+          ylab = 'Promoter',
+          showticklabels = c(TRUE, TRUE), 
+          margins = c(100, 100, 40, 20),
+          scale_fill_gradient_fun = ggplot2::scale_fill_gradient2(low = "navyblue", high = "orangered", mid = 'gray90' ,midpoint = 0, limits = c(-2.5,2.5)),
+          row_side_colors = rownames(matSplit_Resc_KLf2Filt)%in%HK_Promoters$frag2
+)
+
+```
+
+```{r CLuster_HousekeepingBig, fig.width=10, fig.height=7}
+
+matSplit_Resc_KLf2Filt2<-matSplit_Resc_KLf2[rowSums(!is.na(matSplit_Resc_KLf2))>15,colSums(!is.na(matSplit_Resc_KLf2))>10]
+
+
+
+ggheatmap(matSplit_Resc_KLf2Filt2 
+          ,seriate = 'OLO', 
+          orderRow=T,
+          xlab = 'Query', 
+          ylab = 'Promoter',
+          showticklabels = c(TRUE, TRUE), 
+          margins = c(100, 100, 40, 20),
+          scale_fill_gradient_fun = ggplot2::scale_fill_gradient2(low = "navyblue", high = "orangered", mid = 'gray90' ,midpoint = 0, limits = c(-2.5,2.5)),
+          row_side_colors = rownames(matSplit_Resc_KLf2Filt2)%in%HK_Promoters$frag2
+)
+
+```

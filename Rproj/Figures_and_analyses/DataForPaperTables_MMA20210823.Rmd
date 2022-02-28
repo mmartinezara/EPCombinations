@@ -1,0 +1,172 @@
+---
+title: "DataForPaperTables_MMA20210823"
+author: "MMA"
+date: "23/8/2021"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/FigureS1/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(dplyr)
+library(GGally)  
+library(ggbeeswarm)
+
+```
+
+
+
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitHub/EPCombinations/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="klf2")%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+
+```
+
+# Table1
+```{r}
+# Nr of distinct candidate regulatory elements present in the combinatorial libraries.
+all_comball%>% 
+  filter(class=="EP")%>%
+  distinct(frag1, DAT)%>%
+  group_by(DAT)%>%
+  summarise(n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>% 
+  filter(class=="EP")%>%
+  distinct(frag1,)%>%
+  summarise(n())
+```
+```{r }
+# Nr of distinct Promoters present in the combinatorial libraries.
+all_comball%>% 
+  filter(class=="EP")%>%
+  distinct(frag2, DAT)%>%
+  group_by(DAT)%>%
+  summarise(n())
+```
+
+
+```{r CombNrsUpstreamAssay_Unique, fig.width = 5, fig.height = 5}
+# NR of EP combinations
+
+all_comball%>%filter(class=="EP")%>%
+  group_by(DAT)%>%
+      #distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  filter(class%in%c("EP"))%>%
+  group_by(DAT)%>%
+  #distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+```
+
+```{r CombNrsUpstreamAssay_Unique, fig.width = 5, fig.height = 5}
+# NR of unique EP combinations
+
+all_comball%>%filter(class=="EP")%>%
+  group_by(DAT)%>%
+      distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  filter(class%in%c("EP"))%>%
+  group_by(DAT)%>%
+  distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+```
+
+# Table1
+
+```{r CombNrsUpstreamAssay_Unique, fig.width = 5, fig.height = 5}
+# NR of other combinations
+
+all_comball%>%
+  group_by(DAT, class)%>%
+  summarise(combinations=n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  group_by(DAT, class)%>%
+  summarise(combinations=n())
+
+```
+
+```{r CombNrsUpstreamAssay_Unique, fig.width = 5, fig.height = 5}
+# NR of unique other combinations
+
+all_comball%>%
+  group_by(DAT, class)%>%
+      distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  group_by(DAT, class)%>%
+  distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+```

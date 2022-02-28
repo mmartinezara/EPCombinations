@@ -1,0 +1,2413 @@
+---
+title: "UpdatedTFscreen_MMA20210618"
+author: "MMA"
+date: "18/6/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/Figure4V2/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+
+#load libraries
+```{r libs and fun, tidy = FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ComplexUpset)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+
+
+```
+
+#intro
+
+This document is intended to update the TF screen with the latest datasets in order to make publication grade figures.
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+# Make tib with the 3 libraries
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="Klf2")%>%
+  mutate(id1=paste0(frag1,strand1))%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+```
+
+
+
+## Relation boosting E and P activities
+```{r, fig.width = 60, fig.height = 25, echo=FALSE}
+all_comball %>%
+  filter(class %in% c("EP"))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  ggplot(aes(log2(activity_all_frag2), BoostPerPmed)) +
+  scale_fill_gradient2(low = 'navyblue', mid='gray95', high = 'orangered', name="Boosting index", guide= guide_colourbar(barwidth = 3, barheight = 30))+
+  geom_jitter( size=5, alpha=0.8, color="black",shape = 21, aes(fill=boost)) +
+  xlab('#basal Activity Promoter (log2)') +
+  ylab('boosting index') +
+  ggtitle("Basal Activity Promoter vs Boosting") +
+  theme_bw(base_size=40) + 
+  geom_hline(yintercept=0)+
+  stat_cor(method = "pearson")+
+  geom_smooth(method = lm)+
+  #labs(caption =  paste0('EP (n=',tab[[2]],')')) +
+  #stat_function(fun = (function(x)log2(2*2^(x))), colour = "black")+
+  #stat_function(fun = (function(x)log2(2^(x)/2)), colour = "black")+
+  coord_fixed(ratio = 1)
+  
+```
+
+```{r, fig.width = 60, fig.height = 25, echo=FALSE}
+all_comball %>%
+  filter(class %in% c("EP"))%>%
+  mutate(boost=log2(activity_all/activity_all_frag2))%>%
+  ggplot(aes(log2(activity_all_frag1), BoostPerPmed)) +
+  scale_fill_gradient2(low = 'navyblue', mid='gray95', high = 'orangered', name="Boosting index", guide= guide_colourbar(barwidth = 3, barheight = 30))+
+  geom_jitter( size=5, alpha=0.8, color="black",shape = 21, aes(fill=boost)) +
+  xlab('#basal Activity cCRE (log2)') +
+  ylab('boosting index') +
+  ggtitle("Basal Activity cCRE vs Boosting") +
+  theme_bw(base_size=40) + 
+  geom_hline(yintercept=0)+
+  stat_cor(method = "pearson")+
+  geom_smooth(method = lm)+
+  #labs(caption =  paste0('EP (n=',tab[[2]],')')) +
+  #stat_function(fun = (function(x)log2(2*2^(x))), colour = "black")+
+  #stat_function(fun = (function(x)log2(2^(x)/2)), colour = "black")+
+  coord_fixed(ratio = 1)
+  
+```
+
+## Prepare dataset for screen
+```{r}
+all_comball_screen<-all_comball %>%
+  mutate(frag1 = paste0(frag1,"_",  DAT),
+         id1   = paste0(frag1, strand1),
+         frag2 = paste0(frag2,"_", DAT),
+         id2  =  paste0(frag2, strand2),
+         id   =  paste0(id1, id2))
+
+# combine libs (950 basal elements, >38k combinations)
+#tib_basal <- bind_rows(tib_basal_klf2, tib_basal_nanog, tib_basal_tfcp)
+#tib_comb  <- bind_rows(tib_comb_klf2, tib_comb_nanog, tib_comb_tfcp)
+
+# rename cols for backward compatibility
+# note: hack
+all_comball_screen_ready <- all_comball_screen %>%
+  filter(Nbasal>10)%>%
+    dplyr::filter(!BoostPerPmed %in% c(NA,Inf,-Inf,NaN))%>%
+  dplyr::rename(coop_add = BoostPerPmed)
+#%>%
+  # exclude E>P
+  #dplyr::filter(activity_all_frag1 < activity_all_frag2)
+```
+
+```{r}
+load('~/mydata/GitLab/gurten/gurten/data/fc180924_chipseq_chen_et_al_grl.RData')
+```
+
+```{r}
+load('~/mydata/GitLab/gurten/gurten/data/fc181121_epsure_tadec_rnaseq_expr_joshi.RData')
+
+tib_fpkm_joshi <- tib_fpkm_joshi %>%
+  dplyr::select(-contains('serum')) %>%
+  rowwise() %>%
+  mutate(expr_mean = mean(c(twoi_1, twoi_2))) %>%
+  ungroup()
+
+tib_rlog_joshi <- tib_rlog_joshi %>%
+  dplyr::select(-contains('serum')) %>%
+  rowwise() %>%
+  mutate(expr_mean = mean(c(twoi_1, twoi_2))) %>%
+  ungroup()
+
+
+
+```
+
+```{r}
+
+# load motif Metadata --> PWM feature matrix
+tib_pwm_klf2  <- get_pwm_feature_matrix(motif_meta_fn = '~/mydata/GitLab/gurten/gurten/data/motifs/fc190311_motif_metadata.csv', 
+                                        fimo_fn       = '~/mydata/GitLab/gurten/gurten/data/motifs/klf2/fimo.tsv',
+                                        db            = 2)
+
+tib_pwm_nanog <- get_pwm_feature_matrix(motif_meta_fn = '~/mydata/GitLab/gurten/gurten/data/motifs/fc190311_motif_metadata.csv', 
+                                        fimo_fn       = '~/mydata/GitLab/gurten/gurten/data/motifs/nanog/fimo.tsv',
+                                        db            = 2)
+
+tib_pwm_tfcp  <- get_pwm_feature_matrix(motif_meta_fn = '~/mydata/GitLab/gurten/gurten/data/motifs/fc190311_motif_metadata.csv', 
+                                        fimo_fn       = '~/mydata/GitLab/gurten/gurten/data/motifs/tfcp2l1/fimo.tsv',
+                                        db            = 2)
+
+# combine libraries
+# some TFs may not yield significant hits: replace NA padding introduced by bind_rows --> 0
+# which(is.na(tib_pwm), arr.ind = TRUE)
+tib_pwm       <- bind_rows(tib_pwm_nanog, tib_pwm_klf2, tib_pwm_tfcp) %>%
+  replace(., is.na(.), 0)
+
+# add motif scores to pairs
+tib_comb      <- add_motif_score(all_comball_screen_ready, tib_pwm)
+
+# extract motif ids
+motif_ids <- tib_pwm %>%
+  select(-id) %>%
+  names
+
+```
+
+
+
+
+
+```{r}
+#tib_adj <- tib_comb_adj %>% 
+#  filter(class %in% c('EP')) %>%
+#  #Backwards comp
+#  mutate(coop_add=BoostPerPmed)%>%
+#  filter(Nbasal>10)%>%
+  #mutate(frag1=paste0(frag1,library))%>%
+  #mutate(frag2=paste0(frag2,library))%>%
+  #mutate(frag1 = paste0(frag1, library),
+  #       id1   = paste0(frag1, strand1),
+  #       frag2 = paste0(frag2, library),
+  #       id2  =  paste0(frag2, strand2),
+  #       id   =  paste0(id1, id2))%>%
+#  group_by(class) %>%
+#  nest
+
+# For some reason now nest and map work differently, therefore, this does not work.
+#tib_screen_all <- tib_comb %>%
+#  filter(class%in%c("EP", "PP"))%>%
+#  group_by(class) %>%
+#  #nest()%>%
+#  #rename(x =data )%>%
+#  #unnest()%>%
+#  mutate(screen = map(.x, ~screen_tf(tib=.x, motif_ids, tib_fpkm_joshi))) %>%
+#  select(class, screen) %>%
+#  unnest
+
+tib_screen_EP <- tib_comb %>%
+  filter(class%in%c("EP"))%>%
+  #group_by(class) %>%
+  #nest()%>%
+screen_tf(tib=., motif_ids, tib_fpkm_joshi)%>%
+  mutate(class="EP")
+
+
+  #unnest()%>%
+  #mutate(screen = map(.x, ~screen_tf(tib=.x, motif_ids, tib_fpkm_joshi))) %>%
+  #select(class, screen) %>%
+  #unnest
+
+
+tib_screen_all_expr <- tib_screen_EP %>%
+  filter(expr_mean >= 1)
+```
+### make circular plot
+```{r, fig.width = 10, fig.height =10}
+plot_tf_screen_radial(tib_screen_all_expr %>% filter(class == 'EP'& !id%in%c("ELK3","MBD2")), qval = 1e-5, caption = 'q <= 1e-5')+
+  theme(text = element_text(size=20))
+
+plot_tf_screen_radial(tib_screen_all_expr, qval = 1e-5, caption = 'q <= 1e-5')+
+  theme(text = element_text(size=20))
+  
+```
+
+
+```{r SelfCompAllEP, fig.width = 10, fig.height =10}
+plot_tf_screen(tib_screen_all_expr %>% filter(class == 'EP'), type = 'broad', title = 'EP - Broad compatible all', n_label=40) +
+  coord_cartesian(xlim = c(-1, 1))
+plot_tf_screen(tib_screen_all_expr %>% filter(class == 'EP'), type = 'self', title = 'EP - Self compatible all', n_label=40) +
+    coord_cartesian(xlim = c(-1, 1.5))
+```
+
+```{r, fig.width = 10, fig.height =10}
+plot_coop_by_motif(tib_comb %>% 
+  filter(class %in% c('EP')) %>%
+  #Backwards comp
+  #mutate(coop_add=BoostPerPmed)%>%
+  filter(Nbasal>10) %>% filter(class == 'EP'), 'ZFX', caption = 'All EP pairs', title = 'ZFX')
+```
+
+```{r, fig.width = 10, fig.height =10}
+plot_coop_by_motif(tib_comb %>% 
+  filter(class %in% c('EP')) %>%
+  #Backwards comp
+  #mutate(coop_add=BoostPerPmed)%>%
+  filter(Nbasal>10) %>% filter(class == 'EP'), 'ELK3', caption = 'All EP pairs', title = 'ELK3')
+```
+
+```{r, fig.width = 10, fig.height =10}
+plot_coop_by_motif(tib_comb %>% 
+  filter(class %in% c('EP')) %>%
+  #Backwards comp
+ # mutate(coop_add=BoostPerPmed)%>%
+  filter(Nbasal>10) %>% filter(class == 'EP'), 'SOX2', caption = 'All EP pairs', title = 'SOX2')
+```
+
+
+# Screen with AVG EP+ dataset
+
+## Prepare dataset for screen
+```{r}
+all_comball_screen_plusAVG<-all_comball %>%
+  mutate(frag1 = paste0(frag1,"_",  DAT),
+         id1   = paste0(frag1),
+         frag2 = paste0(frag2,"_", DAT),
+         id2  =  paste0(frag2, strand2),
+         id   =  paste0(id1, id2))%>%
+  filter(Nbasal>10)%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  dplyr::filter(!BoostPerPmed %in% c(NA,Inf,-Inf,NaN))%>%
+  group_by(frag1, frag2, id1, id2, id, class)%>%
+  summarise(BoostPerPmedAvgOrien=mean(BoostPerPmed))%>%
+  dplyr::rename(coop_add = BoostPerPmedAvgOrien)
+  
+
+# combine libs (950 basal elements, >38k combinations)
+#tib_basal <- bind_rows(tib_basal_klf2, tib_basal_nanog, tib_basal_tfcp)
+#tib_comb  <- bind_rows(tib_comb_klf2, tib_comb_nanog, tib_comb_tfcp)
+
+# rename cols for backward compatibility
+# note: hack
+#all_comball_screen_ready <- all_comball_screen %>%
+#  filter(Nbasal>10)%>%
+#    dplyr::filter(!BoostPerPmed %in% c(NA,Inf,-Inf,NaN))%>%
+#  dplyr::rename(coop_add = BoostPerPmed)
+#%>%
+  # exclude E>P
+  #dplyr::filter(activity_all_frag1 < activity_all_frag2)
+
+# add motif scores to pairs
+tib_comb_EPplus_AVG      <- add_motif_score(all_comball_screen_plusAVG, tib_pwm)
+```
+
+```{r}
+tib_screen_EPplusAVG <- tib_comb_EPplus_AVG %>%
+  #filter(class%in%c("EP"))%>%
+  #group_by(class) %>%
+  #nest()%>%
+screen_tf(tib=., motif_ids, tib_fpkm_joshi)%>%
+  mutate(class="EP")
+
+
+  #unnest()%>%
+  #mutate(screen = map(.x, ~screen_tf(tib=.x, motif_ids, tib_fpkm_joshi))) %>%
+  #select(class, screen) %>%
+  #unnest
+
+
+tib_screen_EPplusAVG_expr <- tib_screen_EPplusAVG %>%
+  filter(expr_mean >= 1)
+```
+
+```{r}
+tib_screen_EPplusAVG_expr%>%
+  filter(fdr<0.01)%>%
+  group_by(type)%>% 
+  summarise(n())
+```
+
+
+```{r SelfCompAllEP_AVG, fig.width = 8, fig.height =8}
+plot_tf_screen(tib_screen_EPplusAVG_expr %>% filter(class == 'EP'), type = 'broad', title = 'EP - Broad compatible all', n_label=40) +
+  coord_cartesian(xlim = c(-0.5, 0.5))
+plot_tf_screen(tib_screen_EPplusAVG_expr %>% filter(class == 'EP'), type = 'broad', title = 'EP - Broad compatible all', n_label=40 , qval=0.01)+
+  coord_cartesian(xlim = c(-0.5, 0.5))
+plot_tf_screen(tib_screen_EPplusAVG_expr %>% filter(class == 'EP'), type = 'self', title = 'EP - Self compatible all', n_label=40) +
+    coord_cartesian(xlim = c(-0.5, 1.5))
+plot_tf_screen(tib_screen_EPplusAVG_expr %>% filter(class == 'EP'), type = 'self', title = 'EP - Self compatible all', n_label=40, qval=0.01) +
+    coord_cartesian(xlim = c(-0.5, 1.5))
+
+```
+
+## Screen V2 Sef compatible TF at Enh
+
+```{r}
+#Redefine Function
+screen_tf_V2 <- function(tib, tf_id_vec, tib_expr) {
+
+  # init median/pval/n output vectors
+  # suffix 0: 1 vs 0 comparison
+  # suffix 1: 2 vs 1 comparison
+  n_tf       <- length(tf_id_vec)
+  med_vec_0  <- rep(Inf, n_tf)
+  med_vec_1  <- rep(Inf, n_tf)
+  n_vec_0    <- rep(0, n_tf)
+  n_vec_1    <- rep(0, n_tf)
+  pval_vec_0 <- rep(1, n_tf)
+  pval_vec_1 <- rep(1, n_tf)
+
+  # add tf ids
+  names(med_vec_0) <- names(pval_vec_0) <- names(n_vec_0) <- tf_id_vec
+  names(med_vec_1) <- names(pval_vec_1) <- names(n_vec_1) <- tf_id_vec
+
+  for(tf_id in tf_id_vec) {
+
+    # generate colnames to match
+    tf_id1 <- paste0(tf_id, '_frag1')
+    tf_id2 <- paste0(tf_id, '_frag2')
+
+    # create a symb
+    col1   <- rlang::sym(tf_id1)
+    col2   <- rlang::sym(tf_id2)
+
+    # extract cols and count instances (!! to unquote symb)
+    tib_plt <- tib %>%
+      filter(!(!!col1==0 & !!col2>1))%>%
+      rowwise() %>%
+      mutate(n = sum((!!col1) > 0, (!!col2) > 0)) %>%
+      dplyr::select(n, coop_add)
+
+    # group coop by number of instances
+    l <- split(tib_plt[['coop_add']], tib_plt[['n']])
+
+    # compute median coop by group
+    med_by_group <- sapply(l, median, na.rm = TRUE)
+
+    # test significance (iff exists group 2 & >=5 data points)
+    if(length(med_by_group) == 3) {
+
+      if(length(l$`2`) >= 5) {
+
+        # wilcoxon test + extract p-value
+        pval_0            <- wilcox.test(l$`0`, l$`1`)$p.value
+        pval_1            <- wilcox.test(l$`1`, l$`2`)$p.value
+
+        pval_vec_0[tf_id] <- pval_0
+        pval_vec_1[tf_id] <- pval_1
+
+      }
+    }
+
+    # count min number of pairs contributing to each comparison
+    n_0 <- min(length(l$`0`), length(l$`1`))
+    n_1 <- min(length(l$`1`), length(l$`2`))
+
+    n_vec_0[tf_id] <- n_0
+    n_vec_1[tf_id] <- n_1
+
+    # compute effect size: delta median coop
+    med_vec_0[tf_id] <- med_by_group[2] - med_by_group[1]
+    med_vec_1[tf_id] <- med_by_group[3] - med_by_group[2]
+  }
+
+  # adjust p-vals (BH)
+  pval_vec_0 <- p.adjust(pval_vec_0, method = 'BH')
+  pval_vec_1 <- p.adjust(pval_vec_1, method = 'BH')
+
+  # format output
+  tib <- tibble(id          = rep(tf_id_vec, 2),
+                type        = factor(rep(c('broad', 'self'), each = n_tf)),
+                effect_size = c(med_vec_0, med_vec_1),
+                fdr         = c(pval_vec_0, pval_vec_1),
+                n_min       = c(n_vec_0, n_vec_1))
+
+  # if expression data provided, add expression values
+  if(!missing(tib_expr)) {
+
+    tib <- tib %>%
+      left_join(select(tib_expr, symbol, expr_mean), by = c('id' = 'symbol'))
+
+  }
+
+  return(tib)
+}
+```
+
+
+```{r include=FALSE}
+tib_screen_EPplusAVGV2 <- tib_comb_EPplus_AVG %>%
+  #filter(class%in%c("EP"))%>%
+  #group_by(class) %>%
+  #nest()%>%
+screen_tf_V2(tib=., motif_ids, tib_fpkm_joshi)%>%
+  mutate(class="EP")
+
+
+  #unnest()%>%
+  #mutate(screen = map(.x, ~screen_tf(tib=.x, motif_ids, tib_fpkm_joshi))) %>%
+  #select(class, screen) %>%
+  #unnest
+
+
+tib_screen_EPplusAVG_exprV2 <- tib_screen_EPplusAVGV2 %>%
+  filter(expr_mean >= 1)
+```
+
+```{r}
+tib_screen_EPplusAVG_exprV2%>%
+  filter(fdr<0.01)%>%
+  group_by(type)%>% 
+  summarise(n())
+```
+
+```{r}
+ tib_screen_EPplusAVG_exprV2%>%
+     filter(id=="CTCF")
+```
+
+
+
+```{r SelfCompAllEP_AVGActivators, fig.width = 8, fig.height =8}
+plot_tf_screen(tib_screen_EPplusAVG_exprV2 %>% filter(class == 'EP'), type = 'broad', title = 'EP - Broad compatible all', n_label=40) 
+  #coord_cartesian(xlim = c(-0.5, 0.5))
+plot_tf_screen(tib_screen_EPplusAVG_exprV2 %>% filter(class == 'EP'), type = 'broad', title = 'EP - Broad compatible all', n_label=40 , qval=0.1)
+  #coord_cartesian(xlim = c(-0.5, 0.5))
+plot_tf_screen(tib_screen_EPplusAVG_exprV2 %>% filter(class == 'EP'), type = 'self', title = 'EP - Self compatible all', n_label=40) 
+    #coord_cartesian(xlim = c(-0.5, 1.5))
+plot_tf_screen(tib_screen_EPplusAVG_exprV2 %>% filter(class == 'EP'), type = 'self', title = 'EP - Self compatible all', n_label=40, qval=0.1) 
+    #coord_cartesian(xlim = c(-0.5, 1.5))
+
+```
+
+```{r}
+tib_screen_EPplusAVG_exprV2%>%
+  filter(id=="KLF4")
+```
+
+
+
+```{r}
+tib_comb_EPplus_AVG%>%
+  filter(SOX2_frag1==0 & SOX2_frag2==0)%>%
+  nrow()
+
+tib_comb_EPplus_AVG%>%
+  filter(SOX2_frag1>0 & SOX2_frag2==0)%>%
+  nrow()
+
+tib_comb_EPplus_AVG%>%
+  filter(SOX2_frag1==0 & SOX2_frag2>0)%>%
+  nrow()
+
+tib_comb_EPplus_AVG%>%
+  filter(SOX2_frag1>0 & SOX2_frag2>0)%>%
+  nrow()
+```
+
+```{r}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  filter(SOX2_frag1==0 & SOX2_frag2==0)%>%
+  summarise(median(coop_add), n())
+
+
+tib_comb_EPplus_AVG%>%
+   ungroup()%>%
+  filter(SOX2_frag1>0 & SOX2_frag2==0)%>%
+  summarise(median(coop_add), n())
+
+
+tib_comb_EPplus_AVG%>%
+   ungroup()%>%
+  filter(SOX2_frag1==0 & SOX2_frag2>0)%>%
+  summarise(median(coop_add), n())
+
+tib_comb_EPplus_AVG%>%
+   ungroup()%>%
+  filter(xor(SOX2_frag1>0, SOX2_frag2>0))%>%
+  summarise(median(coop_add), n())
+
+
+tib_comb_EPplus_AVG%>%
+   ungroup()%>%
+  filter(SOX2_frag1>0 & SOX2_frag2>0)%>%
+  summarise(median(coop_add), n())
+
+```
+
+
+
+## Screen V2 Sef compatible TF at promoter
+
+```{r}
+#Redefine Function
+screen_tf_V2PromiscuousPs <- function(tib, tf_id_vec, tib_expr) {
+
+  # init median/pval/n output vectors
+  # suffix 0: 1 vs 0 comparison
+  # suffix 1: 2 vs 1 comparison
+  n_tf       <- length(tf_id_vec)
+  med_vec_0  <- rep(Inf, n_tf)
+  med_vec_1  <- rep(Inf, n_tf)
+  n_vec_0    <- rep(0, n_tf)
+  n_vec_1    <- rep(0, n_tf)
+  pval_vec_0 <- rep(1, n_tf)
+  pval_vec_1 <- rep(1, n_tf)
+
+  # add tf ids
+  names(med_vec_0) <- names(pval_vec_0) <- names(n_vec_0) <- tf_id_vec
+  names(med_vec_1) <- names(pval_vec_1) <- names(n_vec_1) <- tf_id_vec
+
+  for(tf_id in tf_id_vec) {
+
+    # generate colnames to match
+    tf_id1 <- paste0(tf_id, '_frag1')
+    tf_id2 <- paste0(tf_id, '_frag2')
+
+    # create a symb
+    col1   <- rlang::sym(tf_id1)
+    col2   <- rlang::sym(tf_id2)
+
+    # extract cols and count instances (!! to unquote symb)
+    tib_plt <- tib %>%
+      filter(!(!!col1>1 & !!col2==0))%>%
+      rowwise() %>%
+      mutate(n = sum((!!col1) > 0, (!!col2) > 0)) %>%
+      dplyr::select(n, coop_add)
+
+    # group coop by number of instances
+    l <- split(tib_plt[['coop_add']], tib_plt[['n']])
+
+    # compute median coop by group
+    med_by_group <- sapply(l, median, na.rm = TRUE)
+
+    # test significance (iff exists group 2 & >=5 data points)
+    if(length(med_by_group) == 3) {
+
+      if(length(l$`2`) >= 5) {
+
+        # wilcoxon test + extract p-value
+        pval_0            <- wilcox.test(l$`0`, l$`1`)$p.value
+        pval_1            <- wilcox.test(l$`1`, l$`2`)$p.value
+
+        pval_vec_0[tf_id] <- pval_0
+        pval_vec_1[tf_id] <- pval_1
+
+      }
+    }
+
+    # count min number of pairs contributing to each comparison
+    n_0 <- min(length(l$`0`), length(l$`1`))
+    n_1 <- min(length(l$`1`), length(l$`2`))
+
+    n_vec_0[tf_id] <- n_0
+    n_vec_1[tf_id] <- n_1
+
+    # compute effect size: delta median coop
+    med_vec_0[tf_id] <- med_by_group[2] - med_by_group[1]
+    med_vec_1[tf_id] <- med_by_group[3] - med_by_group[2]
+  }
+
+  # adjust p-vals (BH)
+  pval_vec_0 <- p.adjust(pval_vec_0, method = 'BH')
+  pval_vec_1 <- p.adjust(pval_vec_1, method = 'BH')
+
+  # format output
+  tib <- tibble(id          = rep(tf_id_vec, 2),
+                type        = factor(rep(c('broad', 'self'), each = n_tf)),
+                effect_size = c(med_vec_0, med_vec_1),
+                fdr         = c(pval_vec_0, pval_vec_1),
+                n_min       = c(n_vec_0, n_vec_1))
+
+  # if expression data provided, add expression values
+  if(!missing(tib_expr)) {
+
+    tib <- tib %>%
+      left_join(select(tib_expr, symbol, expr_mean), by = c('id' = 'symbol'))
+
+  }
+
+  return(tib)
+}
+```
+
+
+```{r include=FALSE}
+tib_screen_EPplusAVGV2PromiscuousPs <- tib_comb_EPplus_AVG %>%
+  #filter(class%in%c("EP"))%>%
+  #group_by(class) %>%
+  #nest()%>%
+screen_tf_V2PromiscuousPs(tib=., motif_ids, tib_fpkm_joshi)%>%
+  mutate(class="EP")
+
+
+  #unnest()%>%
+  #mutate(screen = map(.x, ~screen_tf(tib=.x, motif_ids, tib_fpkm_joshi))) %>%
+  #select(class, screen) %>%
+  #unnest
+
+
+tib_screen_EPplusAVG_exprV2PromiscuousPs <- tib_screen_EPplusAVGV2PromiscuousPs %>%
+  filter(expr_mean >= 1)
+```
+
+```{r}
+tib_screen_EPplusAVG_exprV2PromiscuousPs%>%
+  filter(fdr<0.01)%>%
+  group_by(type)%>% 
+  summarise(n())
+```
+
+
+```{r SelfCompAllEP_AVGPromiscP, fig.width = 8, fig.height =8}
+plot_tf_screen(tib_screen_EPplusAVG_exprV2PromiscuousPs %>% filter(class == 'EP'), type = 'broad', title = 'EP - Broad compatible P', n_label=40) 
+  #coord_cartesian(xlim = c(-0.5, 0.5))
+plot_tf_screen(tib_screen_EPplusAVG_exprV2PromiscuousPs %>% filter(class == 'EP'), type = 'broad', title = 'EP - Broad compatible P', n_label=40 , qval=0.1)
+  #coord_cartesian(xlim = c(-0.5, 0.5))
+plot_tf_screen(tib_screen_EPplusAVG_exprV2PromiscuousPs %>% filter(class == 'EP'), type = 'self', title = 'EP - Self compatible P', n_label=40) 
+    #coord_cartesian(xlim = c(-0.5, 1.5))
+plot_tf_screen(tib_screen_EPplusAVG_exprV2PromiscuousPs %>% filter(class == 'EP'), type = 'self', title = 'EP - Self compatible P', n_label=40, qval=0.01) 
+    #coord_cartesian(xlim = c(-0.5, 1.5))
+
+```
+
+## Screen TF combinations self comp
+
+
+```{r}
+#Redefine Function
+screen_tf_TFduos <- function(tib, tf_id_table, tib_expr) {
+
+  # init median/pval/n output vectors
+  # suffix 0: 1 vs 0 comparison
+  # suffix 1: 2 vs 1 comparison
+  n_tf       <- nrow(tf_id_table)
+  med_vec_0  <- rep(Inf, n_tf)
+  med_vec_1  <- rep(Inf, n_tf)
+  n_vec_0    <- rep(0, n_tf)
+  n_vec_1    <- rep(0, n_tf)
+  pval_vec_0 <- rep(1, n_tf)
+  pval_vec_1 <- rep(1, n_tf)
+
+  # add tf ids
+  names(med_vec_0) <- names(pval_vec_0) <- names(n_vec_0) <- tf_id_table$comb
+  names(med_vec_1) <- names(pval_vec_1) <- names(n_vec_1) <- tf_id_table$comb
+
+  for(tf_comb in tf_id_table$comb) {
+tf_id1<-tf_id_table%>% filter(comb==tf_comb) %>% select(TF1) %>% as.character()
+tf_id2<-tf_id_table%>% filter(comb==tf_comb) %>% select(TF2) %>% as.character()
+    # generate colnames to match
+    tf_id1_f1 <- paste0(tf_id1, '_frag1')
+    tf_id1_f2 <- paste0(tf_id1, '_frag2')
+    tf_id2_1 <- paste0(tf_id2, '_frag1')
+    tf_id2_f2 <- paste0(tf_id2, '_frag2')
+
+    # create a symb
+    col1.1   <- rlang::sym(tf_id1_f1)
+    col1.2   <- rlang::sym(tf_id1_f2)
+    col2.1   <- rlang::sym(tf_id2_1)
+    col2.2   <- rlang::sym(tf_id2_f2)
+
+    # extract cols and count instances (!! to unquote symb)
+    tib_plt <- tib %>%
+      filter(!(!!col1.1==0 & !!col1.2>1 & !!col2.1==0 & !!col2.2>1))%>%
+      rowwise() %>%
+      mutate(n = sum((!!col1.1) > 0, (!!col1.2) > 0, (!!col2.1) > 0, (!!col2.2) > 0)) %>%
+      filter(!n%in%c(1,3))%>%
+      dplyr::select(n, coop_add)
+
+    # group coop by number of instances
+    l <- split(tib_plt[['coop_add']], tib_plt[['n']])
+
+    # compute median coop by group
+    med_by_group <- sapply(l, median, na.rm = TRUE)
+
+    # test significance (iff exists group 2 & >=5 data points)
+    if(length(med_by_group) == 3) {
+
+      if(length(l$`4`) >= 5) {
+
+        # wilcoxon test + extract p-value
+        pval_0            <- wilcox.test(l$`0`, l$`2`)$p.value
+        pval_1            <- wilcox.test(l$`2`, l$`4`)$p.value
+
+        pval_vec_0[tf_comb] <- pval_0
+        pval_vec_1[tf_comb] <- pval_1
+
+      }
+    }
+
+    # count min number of pairs contributing to each comparison
+    n_0 <- min(length(l$`0`), length(l$`2`))
+    n_1 <- min(length(l$`2`), length(l$`4`))
+
+    n_vec_0[tf_comb] <- n_0
+    n_vec_1[tf_comb] <- n_1
+
+    # compute effect size: delta median coop
+    med_vec_0[tf_comb] <- med_by_group[2] - med_by_group[1]
+    med_vec_1[tf_comb] <- med_by_group[3] - med_by_group[2]
+  }
+
+  # adjust p-vals (BH)
+  pval_vec_0 <- p.adjust(pval_vec_0, method = 'BH')
+  pval_vec_1 <- p.adjust(pval_vec_1, method = 'BH')
+
+  # format output
+  tib <- tibble(id          = rep(tf_id_table$comb, 2),
+                TF1          = rep(tf_id_table$TF1, 2),
+                TF2          = rep(tf_id_table$TF2, 2),
+                type        = factor(rep(c('broad', 'self'), each = n_tf)),
+                effect_size = c(med_vec_0, med_vec_1),
+                fdr         = c(pval_vec_0, pval_vec_1),
+                n_min       = c(n_vec_0, n_vec_1))
+
+  # if expression data provided, add expression values
+  if(!missing(tib_expr)) {
+
+    tib <- tib %>%
+      left_join(select(tib_expr, symbol, expr_mean), by = c('TF1' = 'symbol'))%>%
+      left_join(select(tib_expr, symbol, expr_mean), by = c('TF2' = 'symbol'))
+
+  }
+
+  return(tib)
+}
+```
+
+```{r}
+#prepare database of TF combs
+BroadSingleTFs<-tib_screen_EPplusAVG_exprV2%>%
+  filter(fdr<0.01)%>%
+  filter(type=="broad")%>%
+  filter(effect_size>0.1)%>%
+  select(id)
+
+BroadSingleTFs
+
+BroadDupletTFs<-tidyr::crossing(BroadSingleTFs%>%
+                                  rename_at(vars(1:1),function(x) paste0(x,"1")),
+                                BroadSingleTFs)%>%
+  mutate(comb=paste0(id1,"+", id))%>%
+  mutate(TF1=id1,TF2=id)%>%
+  select(-id1,-id)%>%
+  filter(!(TF1==TF2))%>%
+filter(TF1<TF2)
+
+
+```
+
+
+
+```{r include=FALSE}
+tib_screen_EPplusAVGV2DupletTFs <- tib_comb_EPplus_AVG %>%
+  #filter(class%in%c("EP"))%>%
+  #group_by(class) %>%
+  #nest()%>%
+screen_tf_TFduos(tib=., BroadDupletTFs, tib_fpkm_joshi)%>%
+  mutate(class="EP")
+
+
+```
+
+```{r}
+tib_screen_EPplusAVGV2DupletTFs%>%
+  filter(fdr<0.01)%>%
+  group_by(type)%>% 
+  summarise(n())
+```
+
+```{r BroadCompAllEP_AVGDups, fig.width = 20, fig.height =20}
+
+plot_tf_screen(tib_screen_EPplusAVGV2DupletTFs %>% filter(class == 'EP')%>% mutate(expr_mean=expr_mean.x), type = 'broad', title = 'EP - Broad compatible Duplets', n_label=100 , qval=0.001)
+  #coord_cartesian(xlim = c(-0.5, 0.5))
+
+```
+```{r SelfCompAllEP_AVGDups, fig.width = 8, fig.height =8}
+
+
+
+plot_tf_screen(tib_screen_EPplusAVGV2DupletTFs %>% filter(class == 'EP')%>% mutate(expr_mean=expr_mean.x) %>% filter(n_min > 50) , type = 'self', title = 'EP - Self compatible Duplets', n_label=100, qval=0.01)
+    ##coord_cartesian(xlim = c(-0.5, 2.5))
+
+```
+
+## Screen Heterotypic Combs EP
+
+
+
+```{r}
+#Redefine Function
+screen_tf_TFduosHET <- function(tib, tf_id_table, tib_expr) {
+
+  # init median/pval/n output vectors
+  # suffix 0: 1 vs 0 comparison
+  # suffix 1: 2 vs 1 comparison
+  n_tf       <- nrow(tf_id_table)
+  med_vec_0  <- rep(Inf, n_tf)
+  med_vec_1  <- rep(Inf, n_tf)
+  n_vec_0    <- rep(0, n_tf)
+  n_vec_1    <- rep(0, n_tf)
+  pval_vec_0 <- rep(1, n_tf)
+  pval_vec_1 <- rep(1, n_tf)
+
+  # add tf ids
+  names(med_vec_0) <- names(pval_vec_0) <- names(n_vec_0) <- tf_id_table$comb
+  names(med_vec_1) <- names(pval_vec_1) <- names(n_vec_1) <- tf_id_table$comb
+
+  for(tf_comb in tf_id_table$comb) {
+tf_id1<-tf_id_table%>% filter(comb==tf_comb) %>% select(TF1) %>% as.character()
+tf_id2<-tf_id_table%>% filter(comb==tf_comb) %>% select(TF2) %>% as.character()
+    # generate colnames to match
+    tf_id1_f1 <- paste0(tf_id1, '_frag1')
+    #tf_id1_f2 <- paste0(tf_id1, '_frag2')
+    #tf_id2_1 <- paste0(tf_id2, '_frag1')
+    tf_id2_f2 <- paste0(tf_id2, '_frag2')
+
+    # create a symb
+    col1.1   <- rlang::sym(tf_id1_f1)
+    #col1.2   <- rlang::sym(tf_id1_f2)
+    #col2.1   <- rlang::sym(tf_id2_1)
+    col2.2   <- rlang::sym(tf_id2_f2)
+
+    # extract cols and count instances (!! to unquote symb)
+    tib_plt <- tib %>%
+      # promoter comparison
+      filter(!(!!col1.1==0 & !!col2.2>1))%>%
+      rowwise() %>%
+      mutate(n = sum((!!col1.1) > 0, (!!col2.2) > 0)) %>%
+      #filter(!n%in%c(1,3))%>%
+      dplyr::select(n, coop_add)
+
+    # group coop by number of instances
+    l <- split(tib_plt[['coop_add']], tib_plt[['n']])
+
+    # compute median coop by group
+    med_by_group <- sapply(l, median, na.rm = TRUE)
+
+    # test significance (iff exists group 2 & >=5 data points)
+    if(length(med_by_group) == 3) {
+
+      if(length(l$`2`) >= 5) {
+
+        # wilcoxon test + extract p-value
+        pval_0            <- wilcox.test(l$`0`, l$`1`)$p.value
+        pval_1            <- wilcox.test(l$`1`, l$`2`)$p.value
+
+        pval_vec_0[tf_comb] <- pval_0
+        pval_vec_1[tf_comb] <- pval_1
+
+      }
+    }
+
+    # count min number of pairs contributing to each comparison
+    n_0 <- min(length(l$`0`), length(l$`1`))
+    n_1 <- min(length(l$`1`), length(l$`2`))
+
+    n_vec_0[tf_comb] <- n_0
+    n_vec_1[tf_comb] <- n_1
+
+    # compute effect size: delta median coop
+    med_vec_0[tf_comb] <- med_by_group[2] - med_by_group[1]
+    med_vec_1[tf_comb] <- med_by_group[3] - med_by_group[2]
+  }
+
+  # adjust p-vals (BH)
+  pval_vec_0 <- p.adjust(pval_vec_0, method = 'BH')
+  pval_vec_1 <- p.adjust(pval_vec_1, method = 'BH')
+
+  # format output
+  tib <- tibble(id          = rep(tf_id_table$comb, 2),
+                TF1          = rep(tf_id_table$TF1, 2),
+                TF2          = rep(tf_id_table$TF2, 2),
+                type        = factor(rep(c('broad', 'self'), each = n_tf)),
+                effect_size = c(med_vec_0, med_vec_1),
+                fdr         = c(pval_vec_0, pval_vec_1),
+                n_min       = c(n_vec_0, n_vec_1))
+
+  # if expression data provided, add expression values
+  if(!missing(tib_expr)) {
+
+    tib <- tib %>%
+      left_join(select(tib_expr, symbol, expr_mean), by = c('TF1' = 'symbol'))%>%
+      left_join(select(tib_expr, symbol, expr_mean), by = c('TF2' = 'symbol'))
+
+  }
+
+  return(tib)
+}
+```
+
+```{r}
+#prepare database of TF combs
+BroadSingleTFs<-tib_screen_EPplusAVG_exprV2%>%
+  filter(fdr<0.01)%>%
+  filter(type=="broad")%>%
+  filter(effect_size>0.1)%>%
+  select(id)
+
+PromiscuousPsSingleTFs<-tib_screen_EPplusAVG_exprV2PromiscuousPs%>%
+  filter(fdr<0.05)%>%
+  filter(type=="broad")%>%
+  filter(effect_size>0.1)%>%
+  select(id)
+
+
+BroadSingleTFs
+
+HETDupletTFs<-tidyr::crossing(BroadSingleTFs%>%
+                                  rename_at(vars(1:1),function(x) paste0(x,"1")),
+                                PromiscuousPsSingleTFs)%>%
+  mutate(comb=paste0(id1,"_", id))%>%
+  mutate(TF1=id1,TF2=id)%>%
+  select(-id1,-id)%>%
+  filter(!(TF1==TF2))
+#filter(TF1<TF2)
+
+
+```
+
+```{r include=FALSE}
+tib_screen_EPplusAVGV2HETDupletTFs <- tib_comb_EPplus_AVG %>%
+  #filter(class%in%c("EP"))%>%
+  #group_by(class) %>%
+  #nest()%>%
+screen_tf_TFduosHET(tib=., HETDupletTFs, tib_fpkm_joshi)%>%
+  mutate(class="EP")
+
+
+```
+
+```{r}
+tib_screen_EPplusAVGV2HETDupletTFs%>%
+  filter(fdr<0.01)%>%
+  group_by(type)%>% 
+  summarise(n())
+```
+
+```{r BRoadCompAllEP_AVGHETDups, fig.width = 8, fig.height =8}
+
+plot_tf_screen(tib_screen_EPplusAVGV2HETDupletTFs %>% filter(class == 'EP')%>% mutate(expr_mean=expr_mean.x), type = 'broad', title = 'EP - Broad compatible Duplets', n_label=100 , qval=0.001)
+  #coord_cartesian(xlim = c(-0.5, 0.5))
+
+```
+
+```{r SelfCompAllEP_AVGHETDups, fig.width = 20, fig.height =20}
+
+
+
+plot_tf_screen(tib_screen_EPplusAVGV2HETDupletTFs %>% filter(class == 'EP')%>% mutate(expr_mean=expr_mean.x)%>% filter(n_min>50), type = 'self', title = 'EP - Self compatible Duplets', n_label=100, qval=0.01) +
+    coord_cartesian(xlim = c(-0.5, 2.5))
+
+tib_screen_EPplusAVGV2HETDupletTFs%>%
+  arrange(desc(effect_size),fdr)
+
+```
+
+
+## Explore multiple TF combinations
+
+### Klf4-Sox2
+
+```{r MultipleCombsFOXO1, fig.width=10, fig.height=10}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(FOXO1=ifelse(FOXO1_frag1>0 &FOXO1_frag2>0, 1,0))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  select(Sox2, KLF4, FOXO1, coop_add)%>%
+  as.data.frame()%>%
+  ComplexUpset::upset(.,c("Sox2", "FOXO1", "KLF4"),
+                      annotations = list(
+        # 2nd method - using ggplot
+        'Boosting index'=(
+            # note that aes(x=intersection) is supplied by default and can be skipped
+            ggplot(mapping=aes( y=coop_add))
+            # checkout ggbeeswarm::geom_quasirandom for better results!
+            + ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)
+            + geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-5,7))+
+              stat_compare_means(label = "p.signif", method = "wilcox.test",
+                     ref.group = "KLF4")
+              #stat_compare_means(method = "wilcox.test", comparisons = my_comparisons)
+        )
+    ))
+
+stat.test_allFOXO1<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(FOXO1=ifelse(FOXO1_frag1>0 &FOXO1_frag2>0, 1,0))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  mutate(Sox2_KLF4=ifelse(Sox2==1 &KLF4==1, 1,NA))%>%
+  mutate("Sox2::FOXO1"=ifelse(Sox2==1 &FOXO1==1, 1,NA))%>%
+  mutate("KLF4::FOXO1"=ifelse(KLF4==1 &FOXO1==1, 1,NA))%>%
+  mutate("Sox2::KLF4::FOXO1"=ifelse(KLF4==1 &FOXO1==1&Sox2==1, 1,NA))%>%
+  mutate("None"=ifelse(is.na(KLF4) &is.na(FOXO1)&is.na(Sox2), 1,NA))%>%
+  select(7:15)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+  
+  
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(FOXO1=ifelse(FOXO1_frag1>0 &FOXO1_frag2>0, 1,0))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  mutate(Sox2_KLF4=ifelse(Sox2==1 &KLF4==1, 1,NA))%>%
+  mutate("Sox2::FOXO1"=ifelse(Sox2==1 &FOXO1==1, 1,NA))%>%
+  mutate("KLF4::FOXO1"=ifelse(KLF4==1 &FOXO1==1, 1,NA))%>%
+  mutate("Sox2::KLF4::FOXO1"=ifelse(KLF4==1 &FOXO1==1&Sox2==1, 1,NA))%>%
+  mutate("None"=ifelse(is.na(KLF4) &is.na(FOXO1)&is.na(Sox2), 1,NA))%>%
+  select(7:15)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::FOXO1","Sox2_KLF4", "FOXO1", "Sox2::FOXO1", "Sox2::KLF4::FOXO1" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=Combs,y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,7))+
+              stat_compare_means(label = "p.signif", method = "wilcox.test",
+                     ref.group = "None")+
+  theme_bw()
+
+```
+
+```{r MultipleCombs, fig.width=10, fig.height=10}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,0))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  select(Sox2, KLF4, ZFX, coop_add)%>%
+  as.data.frame()%>%
+  ComplexUpset::upset(.,c("Sox2", "ZFX", "KLF4"),
+                      annotations = list(
+        # 2nd method - using ggplot
+        'Boosting index'=(
+            # note that aes(x=intersection) is supplied by default and can be skipped
+            ggplot(mapping=aes( y=coop_add))
+            # checkout ggbeeswarm::geom_quasirandom for better results!
+            + ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)
+            + geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-5,7))+
+              stat_compare_means(label = "p.signif", method = "wilcox.test",
+                     ref.group = "KLF4")
+              #stat_compare_means(method = "wilcox.test", comparisons = my_comparisons)
+        )
+    ))
+
+stat.test_all<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,NA))%>%
+  mutate(Sox2_KLF4=ifelse(Sox2==1 &KLF4==1, 1,NA))%>%
+  mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("None"=ifelse(is.na(KLF4) &is.na(ZFX)&is.na(Sox2), 1,NA))%>%
+  select(7:15)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+  
+  
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,NA))%>%
+  mutate(Sox2_KLF4=ifelse(Sox2==1 &KLF4==1, 1,NA))%>%
+  mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("None"=ifelse(is.na(KLF4) &is.na(ZFX)&is.na(Sox2), 1,NA))%>%
+  select(7:15)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=Combs,y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,7))+
+              stat_compare_means(label = "p.signif", method = "wilcox.test",
+                     ref.group = "None")+
+  theme_bw()
+
+```
+
+```{r MultipleCombs_Klf4_sox2, fig.width=7, fig.height=7}
+
+
+stat.test<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(Sox2_KLF4=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(Sox2)&is.na(Sox2_KLF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2_KLF4=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(Sox2)&is.na(Sox2_KLF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,11))+
+  stat_pvalue_manual(
+    stat.test%>%
+      filter(!(group1=="KLF4" &group2=="Sox2"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+```{r}
+
+#check nr of promoters included in the SOX2_Klf4 group
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  dplyr::select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add, frag1, frag2)%>%
+  filter(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0)%>%
+  dplyr::select(frag2)%>%
+  base::unique()
+
+#check nr of Es  included in the SOX2_Klf2 group
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  dplyr::select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add, frag1, frag2)%>%
+  filter(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0)%>%
+  dplyr::select(frag1)%>%
+  base::unique()
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  dplyr::select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add, frag1, frag2)%>%
+  filter(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0)%>%
+  group_by(frag2)%>%
+  summarise(n(), meanboost=mean(coop_add))
+  
+  ## We have 15 promoters x 89 Es in this group with most of them bein represented by more than 5 combinations. and showing positive mean boost indices
+```
+
+
+```{r UpsetRCombs_Klf4_sox2, fig.width=7, fig.height=4}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,0))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  mutate(Null=ifelse(KLF4==0 &Sox2==0, 1,0))%>%
+  select(Null, KLF4,Sox2, coop_add)%>%
+  as.data.frame()%>%
+  UpSetR::upset(.,sets=c("Null", "KLF4", "Sox2"), keep.order = T)
+```
+
+
+```{r}
+## Additivity Klf4 and Sox2
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+ mutate(Sox2_KLF4=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(Sox2)&is.na(Sox2_KLF4), 1,NA))%>%  mutate(Sox2_KLF4=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(Sox2)&is.na(Sox2_KLF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+
+#### Basal activity bias
+
+```{r BasalActivityPromoters_Klf4_sox2, fig.width=7, fig.height=7}
+
+Sox2_Klf4Promoters<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  #select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2_KLF4=ifelse(KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  filter(Sox2_KLF4==1)%>%
+  select(id2)%>%
+  distinct()
+
+all_comball%>%
+  filter(class=="EP", strand2=="+")%>%
+  mutate(id2  =  paste0(frag2,"_",DAT, strand2))%>%
+ mutate(Sox2_Klf4 = ifelse(id2 %in% Sox2_Klf4Promoters$id2, TRUE, FALSE))%>%
+  select(activity_all_frag2, Sox2_Klf4, id2)%>%
+  distinct()%>%
+  ggplot(aes( Sox2_Klf4, log2(activity_all_frag2)))+
+  geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.1)+
+  geom_boxplot(alpha=0.5)+ stat_compare_means(method = "t.test")
+
+ 
+
+```
+
+#### Find examples
+
+```{r}
+Klf4Sox2Es<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(frag1,KLF4_frag1, SOX2_frag1)%>%
+  distinct()%>%
+  filter(KLF4_frag1>0 &SOX2_frag1>0)
+
+Klf4Sox2Ps<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(frag2,KLF4_frag2, SOX2_frag2)%>%
+  distinct()%>%
+  filter(KLF4_frag2>0 &SOX2_frag2>0)
+Klf4Sox2Es
+Klf4Sox2Ps
+```
+
+```{r}
+SelectiveKSenhancers<-tibble(frag1=NA, Boostdiff=NA, n=NA)
+
+for (i in unique(Klf4Sox2Es$frag1)) {
+  BoostmeanTemp<-tib_comb_EPplus_AVG%>%
+    filter(!coop_add%in%c(NA, NaN, -Inf, Inf))%>%
+    filter(frag1==i)%>%
+    mutate(Pstatus= ifelse(KLF4_frag2>0 &SOX2_frag2>0, "positive", "Negative"))%>%
+  group_by(Pstatus)%>%
+  summarise(meanboost=mean(coop_add))%>%
+  .$meanboost%>%
+  as.vector
+  
+   NTemp<-tib_comb_EPplus_AVG%>%
+    filter(!coop_add%in%c(NA, NaN, -Inf, Inf))%>%
+    filter(frag1==i)%>%
+  ungroup()%>%
+  summarise( n=dplyr::n())
+
+BoostdiffTemp<-BoostmeanTemp[2]-BoostmeanTemp[1]
+  
+  SelectiveKSenhancers<-SelectiveKSenhancers%>%
+    add_row(frag1=i, Boostdiff=BoostdiffTemp, n=NTemp$n)
+}
+
+SelectiveKSenhancers%>%
+  arrange(desc(Boostdiff))
+
+
+```
+
+```{r}
+tib_comb_EPplus_AVG%>%
+  filter(frag1=="E090_Nanog")%>%
+  mutate(Pstatus= ifelse(KLF4_frag2>0 &SOX2_frag2>0, "positive", "Negative"))%>%
+  select(1:7,Pstatus)
+  
+```
+
+```{r}
+tib_comb_EPplus_AVG%>%
+  filter(id1%in%c("E090_Nanog"))%>%
+  #filter(!id2%in%c("P012+","P024+" ))%>%
+  #mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  #mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  #mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   #rowwise() %>%
+  #mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+   mutate(Klf4Sox2= ifelse(KLF4_frag2>0 &SOX2_frag2>0, "Both", ifelse(KLF4_frag2==0 &SOX2_frag2==0, "None", "1motif")))%>%
+ggplot(aes(id2, coop_add, fill=Klf4Sox2))+
+geom_bar(stat="identity")+
+  #geom_errorbar(aes(ymin=BoostPerPmed-sdboost, ymax=BoostPerPmed+sdboost), width=.2,
+  #               position=position_dodge(.9))+
+    theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  #scale_fill_gradientn(colors = palBars, values = rescale(c(-1.92, 0, 4.91)), limits = c(-1.92,4.91) ) +
+  #scale_fill_gradient2( low = 'navyblue',mid = "white",high = 'orangered',midpoint = 0)+
+  facet_wrap(~id1)+
+  ggtitle("Examples E090_Nanog")
+
+tib_comb_EPplus_AVG%>%
+  filter(id1%in%c("E090_Nanog"))%>%
+  #filter(!id2%in%c("P012+","P024+" ))%>%
+  #mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  #mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  #mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   #rowwise() %>%
+  #mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+   mutate(Klf4Sox2= ifelse(KLF4_frag2>0 &SOX2_frag2>0, "Both", ifelse(KLF4_frag2==0 &SOX2_frag2==0, "None", "1motif")))%>%
+ggplot(aes(Klf4Sox2, coop_add, fill=Klf4Sox2))+
+  geom_jitter(width=0.1, aes(color=Klf4Sox2))+
+  stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                 geom = "crossbar", width = 0.5)+
+  #stat_compare_means(method = "t.test",label.x = 1.4, label.y = 3)+
+    xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  ggtitle("Examples E090_Nanog")+
+  theme_bw()
+```
+
+
+
+
+```{r}
+tib_comb_EPplus_AVG%>%
+  filter(id1%in%c("E046_Klf2"))%>%
+  #filter(!id2%in%c("P012+","P024+" ))%>%
+  #mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  #mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  #mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   #rowwise() %>%
+  #mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+mutate(Klf4Sox2= ifelse(KLF4_frag2>0 &SOX2_frag2>0, "Both", ifelse(KLF4_frag2==0 &SOX2_frag2==0, "None", "1motif")))%>%
+ggplot(aes(id2, coop_add, fill=Klf4Sox2))+
+geom_bar(stat="identity")+
+  #geom_errorbar(aes(ymin=BoostPerPmed-sdboost, ymax=BoostPerPmed+sdboost), width=.2,
+  #               position=position_dodge(.9))+
+    theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  #scale_fill_gradientn(colors = palBars, values = rescale(c(-1.92, 0, 4.91)), limits = c(-1.92,4.91) ) +
+  #scale_fill_gradient2( low = 'navyblue',mid = "white",high = 'orangered',midpoint = 0)+
+  facet_wrap(~id1)+
+  ggtitle("Examples Klf2 locus filter high sd")
+
+tib_comb_EPplus_AVG%>%
+  filter(id1%in%c("E046_Klf2"))%>%
+  #filter(!id2%in%c("P012+","P024+" ))%>%
+  #mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  #mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  #mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   #rowwise() %>%
+  #mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+mutate(Klf4Sox2= ifelse(KLF4_frag2>0 &SOX2_frag2>0, "Both", ifelse(KLF4_frag2==0 &SOX2_frag2==0, "None", "1motif")))%>%
+ggplot(aes(Klf4Sox2, coop_add, fill=Klf4Sox2))+
+  geom_jitter(width=0.1, aes(color=Klf4Sox2))+
+  stat_summary(fun.y = mean, fun.ymin = mean, fun.ymax = mean,
+                 geom = "crossbar", width = 0.5)+
+  #stat_compare_means(method = "t.test",label.x = 1.4, label.y = 3)+
+    xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  theme_bw()
+```
+
+### Klf4-ZFX
+
+```{r UpsetRCombs_Klf4_ZFX, fig.width=7, fig.height=4}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,0))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  mutate(Null=ifelse(KLF4==0 &ZFX==0, 1,0))%>%
+  select(Null, KLF4,ZFX, coop_add)%>%
+  as.data.frame()%>%
+  UpSetR::upset(.,sets=c("Null", "ZFX","KLF4"), keep.order = T)
+```
+
+```{r MultipleCombs_Klf4_ZFX, fig.width=7, fig.height=7}
+
+
+stat.testZFX_SOX2<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(KLF4_ZFX=ifelse(ZFX_frag1>0 &KLF4_frag1>0 & ZFX_frag2>0 &KLF4_frag2>0, 1,NA))%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_ZFX), 1,NA))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0 & is.na(KLF4_ZFX), 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(KLF4_ZFX), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ZFX)&is.na(KLF4)&is.na(KLF4_ZFX), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+ select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(KLF4_ZFX=ifelse(ZFX_frag1>0 &KLF4_frag1>0 & ZFX_frag2>0 &KLF4_frag2>0, 1,NA))%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_ZFX), 1,NA))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0 & is.na(KLF4_ZFX), 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(KLF4_ZFX), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ZFX)&is.na(KLF4)&is.na(KLF4_ZFX), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,11))+
+  stat_pvalue_manual(
+    stat.testZFX_SOX2%>%
+      filter(!(group2=="ZFX" &group1=="KLF4"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+```{r}
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(ZFX_KLF4=ifelse(KLF4_frag1>0 &ZFX_frag1>0 & ZFX_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0 & is.na(ZFX_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(ZFX_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(ZFX)&is.na(ZFX_KLF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(ZFX_KLF4=ifelse(KLF4_frag1>0 &ZFX_frag1>0 & ZFX_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0 & is.na(ZFX_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(ZFX_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(ZFX)&is.na(ZFX_KLF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+
+
+
+
+
+### Sox2-FOXO1
+
+```{r UpsetRCombs_FOXO1, fig.width=7, fig.height=4}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(FOXO1=ifelse(FOXO1_frag1>0 &FOXO1_frag2>0, 1,0))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  mutate(Null=ifelse(Sox2==0 &FOXO1==0, 1,0))%>%
+  select(Null, Sox2,FOXO1, coop_add)%>%
+  as.data.frame()%>%
+  UpSetR::upset(.,sets=c("Null", "Sox2","FOXO1"), keep.order = T)
+```
+
+```{r MultipleCombs_FOXO1_ZFX, fig.width=7, fig.height=7}
+
+
+stat.testZFX_SOX2<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(Sox2_FOXO1=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & FOXO1_frag1>0 &FOXO1_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_FOXO1), 1,NA))%>%
+    mutate(FOXO1=ifelse(FOXO1_frag1>0 &FOXO1_frag2>0 & is.na(Sox2_FOXO1), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2)&is.na(FOXO1)&is.na(Sox2_FOXO1), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(Sox2_FOXO1=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & FOXO1_frag1>0 &FOXO1_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_FOXO1), 1,NA))%>%
+    mutate(FOXO1=ifelse(FOXO1_frag1>0 &FOXO1_frag2>0 & is.na(Sox2_FOXO1), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2)&is.na(FOXO1)&is.na(Sox2_FOXO1), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,12))+
+  stat_pvalue_manual(
+    stat.testZFX_SOX2%>%
+      filter(!(group2=="ZFX" &group1=="KLF4"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+
+```{r}
+## Additivity FOXO1 and Sox2
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+ mutate(Sox2_FOXO1=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & FOXO1_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_FOXO1), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(FOXO1=ifelse(FOXO1_frag1>0 &FOXO1_frag2>0 & is.na(Sox2_FOXO1), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(FOXO1)&is.na(Sox2)&is.na(Sox2_FOXO1), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+### ZFX-Sox2
+```{r UpsetRCombs_ZFX_Sox2, fig.width=7, fig.height=4}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,0))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0, 1,0))%>%
+  mutate(Null=ifelse(ZFX==0 &Sox2==0, 1,0))%>%
+  select(Null, ZFX,Sox2, coop_add)%>%
+  as.data.frame()%>%
+  UpSetR::upset(.,sets=c("Null", "ZFX", "Sox2"), keep.order = T)
+```
+
+
+```{r MultipleCombs_ZFX_sox2, fig.width=7, fig.height=7}
+
+
+stat.testZFX_SOX2<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(Sox2_ZFX=ifelse(ZFX_frag1>0 &SOX2_frag1>0 & ZFX_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_ZFX), 1,NA))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0 & is.na(Sox2_ZFX), 1,NA))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ZFX)&is.na(Sox2)&is.na(Sox2_ZFX), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(Sox2_ZFX=ifelse(ZFX_frag1>0 &SOX2_frag1>0 & ZFX_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 &SOX2_frag2>0 & is.na(Sox2_ZFX), 1,NA))%>%
+    mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0 & is.na(Sox2_ZFX), 1,NA))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0 &KLF4_frag2>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ZFX)&is.na(Sox2)&is.na(Sox2_ZFX), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,11))+
+  stat_pvalue_manual(
+    stat.testZFX_SOX2%>%
+      filter(!(group2=="ZFX" &group1=="Sox2"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+## Broad
+
+```{r MultipleCombs_Klf4_sox2_Eonly, fig.width=7, fig.height=7}
+
+
+stat.test_broad<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_KLF4=ifelse(SOX2_frag1>0 &KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4) &is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_KLF4=ifelse(SOX2_frag1>0 &KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,12))+
+  stat_pvalue_manual(
+    stat.test_broad%>%
+      filter(!(group1=="KLF4" &group2=="Sox2"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+```{r Broad_additivity}
+## Additivity Klf4 and Sox2
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    mutate(Sox2_KLF4=ifelse(SOX2_frag1>0 &KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_KLF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(KLF4=ifelse(KLF4_frag1>0 & is.na(Sox2_KLF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(KLF4)&is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+## Broad ELF4
+
+```{r MultipleCombs_ELF4_Eonly, fig.width=7, fig.height=7}
+
+
+stat.test_broad<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_ELF4=ifelse(SOX2_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_ELF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 & is.na(Sox2_ELF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ELF4) &is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_ELF4=ifelse(SOX2_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_ELF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 & is.na(Sox2_ELF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ELF4) &is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,12))+
+  stat_pvalue_manual(
+    stat.test_broad%>%
+      filter(!(group1=="ELF4" &group2=="Sox2"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+
+
+```{r Broad_additivityELF4}
+## Additivity ELF4 and Sox2
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+select(SOX2_frag1, SOX2_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_ELF4=ifelse(SOX2_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_ELF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 & is.na(Sox2_ELF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ELF4) &is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+select(SOX2_frag1, SOX2_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   #mutate(Sox2_ELF4=ifelse(SOX2_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 , 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 , 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(ELF4) &is.na(Sox2), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+## Broad ELF4 CREB3
+
+```{r MultipleCombs_ELF4CREB_Eonly, fig.width=7, fig.height=7}
+
+
+stat.test_broad<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(CREB3_frag1, CREB3_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(CREB3_ELF4=ifelse(CREB3_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(CREB3=ifelse(CREB3_frag1>0 & is.na(CREB3_ELF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 & is.na(CREB3_ELF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(CREB3) &is.na(ELF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(CREB3_frag1, CREB3_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(CREB3_ELF4=ifelse(CREB3_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(CREB3=ifelse(CREB3_frag1>0 & is.na(CREB3_ELF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 & is.na(CREB3_ELF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(CREB3) &is.na(ELF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,12))+
+  stat_pvalue_manual(
+    stat.test_broad%>%
+      filter(!(group1=="ELF4" &group2=="Sox2"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+```{r Broad_additivityECREB}
+## Additivity ELF4 and Sox2
+
+tib_comb_EPplus_AVG%>%
+ungroup()%>%
+  select(CREB3_frag1, CREB3_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(CREB3_ELF4=ifelse(CREB3_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(CREB3=ifelse(CREB3_frag1>0 & is.na(CREB3_ELF4), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 & is.na(CREB3_ELF4), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(CREB3) &is.na(ELF4), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(CREB3_frag1, CREB3_frag2, ELF4_frag1, ELF4_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+    #mutate(CREB3_ELF4=ifelse(CREB3_frag1>0 &ELF4_frag1>0, 1,NA))%>%
+  mutate(CREB3=ifelse(CREB3_frag1>0, 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(ELF4=ifelse(ELF4_frag1>0 , 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(CREB3) &is.na(ELF4), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  filter(CREB3_frag1>0 &ELF4_frag1>0 )
+  
+```
+
+
+## Broad NANOG
+
+```{r MultipleCombs_NANOG_Eonly, fig.width=7, fig.height=7}
+
+
+stat.test_broad<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, NANOG_frag1, NANOG_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_NANOG=ifelse(SOX2_frag1>0 &NANOG_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_NANOG), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(NANOG=ifelse(NANOG_frag1>0 & is.na(Sox2_NANOG), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(NANOG) &is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, NANOG_frag1, NANOG_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_NANOG=ifelse(SOX2_frag1>0 &NANOG_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_NANOG), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(NANOG=ifelse(NANOG_frag1>0 & is.na(Sox2_NANOG), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(NANOG)&is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,12))+
+  stat_pvalue_manual(
+    stat.test_broad%>%
+      filter(!(group1=="NANOG" &group2=="Sox2"))%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+```
+
+```{r Broad_additivity_NANOG}
+## Additivity NANOG and Sox2
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+ select(SOX2_frag1, SOX2_frag2, NANOG_frag1, NANOG_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+   mutate(Sox2_NANOG=ifelse(SOX2_frag1>0 &NANOG_frag1>0, 1,NA))%>%
+  mutate(Sox2=ifelse(SOX2_frag1>0 & is.na(Sox2_NANOG), 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    mutate(NANOG=ifelse(NANOG_frag1>0 & is.na(Sox2_NANOG), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(NANOG)&is.na(Sox2), 1,NA))%>%
+  select(7:11)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+
+## Broad vs Self
+
+```{r MultipleCombs_Klf4_sox2_EonlyvsBoth, fig.width=7, fig.height=7}
+
+
+stat.test_broadvsSelf<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 , 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2_KLF4_Both=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(Sox2_KLF4_E=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & is.na(Sox2_KLF4_Both), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2_KLF4_E) &is.na(Sox2_KLF4_Both), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 , 1,NA))%>%
+  #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+  #mutate(KLF4=ifelse(KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2_KLF4_Both=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(Sox2_KLF4_E=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & is.na(Sox2_KLF4_Both), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2_KLF4_E) &is.na(Sox2_KLF4_Both), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,11))+
+  stat_pvalue_manual(
+    stat.test_broadvsSelf%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 , 1,NA))%>%
+  #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+  #mutate(KLF4=ifelse(KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2_KLF4_Both=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(Sox2_KLF4_E=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & is.na(Sox2_KLF4_Both), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2_KLF4_E) &is.na(Sox2_KLF4_Both), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+```{r UpsetRCombs_Klf4_sox2_EvsBoth, fig.width=7, fig.height=4}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, ZFX_frag1, ZFX_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2_KLF4_Both=ifelse(KLF4_frag1>0 &SOX2_frag1>0 & KLF4_frag2>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(Sox2_KLF4_E=ifelse(KLF4_frag1>0 &SOX2_frag1>0 , 1,0))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate(Null=ifelse(Sox2_KLF4_E==0 &Sox2_KLF4_Both==0, 1,0))%>%
+  select(Null, Sox2_KLF4_Both, Sox2_KLF4_E, coop_add)%>%
+  as.data.frame()%>%
+  UpSetR::upset()
+
+```
+
+```{r MultipleCombs_FOXO1_sox2_EonlyvsBoth, fig.width=7, fig.height=7}
+
+
+stat.test_broadvsSelf<-tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 , 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2_FOXO1_Both=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & FOXO1_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(Sox2_FOXO1_E=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & is.na(Sox2_FOXO1_Both), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2_FOXO1_E) &is.na(Sox2_FOXO1_Both), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 , 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2_FOXO1_Both=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & FOXO1_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(Sox2_FOXO1_E=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & is.na(Sox2_FOXO1_Both), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2_FOXO1_E) &is.na(Sox2_FOXO1_Both), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  #mutate(Combs=factor(Combs, levels = c("None","KLF4" ,"Sox2", "KLF4::ZFX","Sox2_KLF4", "ZFX", "Sox2::ZFX", "Sox2::KLF4::ZFX" )))%>%
+  #df()%>%
+  #select(coop_add, Combs)%>%
+  #compare_means(data=.,as.formula("coop_add~Combs"), method = "wilcox.test")
+  ggplot(aes(x=reorder(Combs, coop_add),y=coop_add))+
+  ggbeeswarm::geom_quasirandom(alpha=0.5, size=0.5, na.rm=TRUE)+
+             geom_boxplot(alpha=0.5, na.rm=TRUE)+
+              ylim(c(-4,11))+
+  stat_pvalue_manual(
+    stat.test_broadvsSelf%>%
+      select(group1,group2,p.adj), 
+    y.position = 8, step.increase = 0.05,
+    label = "p.adj"
+    )+
+  theme_bw(base_size = 15)
+
+
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  #mutate(Sox2=ifelse(SOX2_frag1>0 , 1,NA))%>%
+    #mutate(ZFX=ifelse(ZFX_frag1>0 &ZFX_frag2>0, 1,NA))%>%
+    #mutate(KLF4=ifelse(KLF4_frag1>0, 1,NA))%>%
+  mutate(Sox2_FOXO1_Both=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & FOXO1_frag2>0 &SOX2_frag2>0, 1,NA))%>%
+    mutate(Sox2_FOXO1_E=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & is.na(Sox2_FOXO1_Both), 1,NA))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate("Null"=ifelse(is.na(Sox2_FOXO1_E) &is.na(Sox2_FOXO1_Both), 1,NA))%>%
+  select(7:10)%>%
+  pivot_longer(!coop_add, names_to = "Combs", values_drop_na=TRUE)%>%
+  group_by(Combs)%>%
+  summarise(medianBoost=median(coop_add), n=n())
+```
+
+```{r UpsetRCombs_FOXO1_sox2_EvsBoth, fig.width=7, fig.height=4}
+tib_comb_EPplus_AVG%>%
+  ungroup()%>%
+  select(SOX2_frag1, SOX2_frag2, FOXO1_frag1, FOXO1_frag2, KLF4_frag1, KLF4_frag2, coop_add)%>%
+  mutate(Sox2_FOXO1_Both=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 & FOXO1_frag2>0 &SOX2_frag2>0, 1,0))%>%
+    mutate(Sox2_FOXO1_E=ifelse(FOXO1_frag1>0 &SOX2_frag1>0 , 1,0))%>%
+  #mutate("Sox2::ZFX"=ifelse(Sox2==1 &ZFX==1, 1,NA))%>%
+  #mutate("KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1, 1,NA))%>%
+  #mutate("Sox2::KLF4::ZFX"=ifelse(KLF4==1 &ZFX==1&Sox2==1, 1,NA))%>%
+  mutate(Null=ifelse(Sox2_FOXO1_E==0 &Sox2_FOXO1_Both==0, 1,0))%>%
+  select(Null, Sox2_FOXO1_Both, Sox2_FOXO1_E, coop_add)%>%
+  as.data.frame()%>%
+  UpSetR::upset()
+
+```
+
+# TF models
+## load dataset
+```{r}
+# Load models
+load('~/mydata/GitLab/epmatrix/data/MMA20210617_BroadModels_RescaledData_AVG.RData')
+```
+## make AuROC plots
+```{r AUC_LR, fig.width = 10, fig.height = 5}
+#Draw the ROC curve 
+lr.probs_AVG <- predict(fit_lr_AVG, newdata = x_test_AVG, type="prob")
+predict
+
+lr.ROC_AVG <-  pROC::roc(predictor=lr.probs_AVG$C,
+               response=x_test_AVG$y,
+               levels=rev(levels(x_test_AVG$y)))
+
+plotx_AVG <- rev(lr.ROC_AVG$specificities)
+  ploty_AVG <- rev(lr.ROC_AVG$sensitivities)
+  
+  interval = 0.2
+  breaks = seq(0, 1, interval)
+
+  ggplot( NULL,aes(x = plotx_AVG, y = ploty_AVG)) +
+    geom_segment(aes(x = 0, y = 1, xend = 1,yend = 0), alpha = 0.5) + 
+    geom_step() +
+    scale_x_reverse(name = "Specificity",limits = c(1,0), breaks = breaks, expand = c(0.001,0.001)) + 
+    scale_y_continuous(name = "Sensitivity", limits = c(0,1), breaks = breaks, expand = c(0.001, 0.001)) +
+    theme_bw(base_size = 15) + 
+    ggtitle("AUC elastic net model")+
+    theme(axis.ticks = element_line(color = "grey80")) +
+    coord_equal() + 
+    annotate("text", x = 0.7, y = 0.7, label = paste("AUC =",sprintf("%.3f",lr.ROC_AVG$auc)))
+```
+```{r AUC_RF, fig.width = 10, fig.height = 5}
+#Draw the ROC curve 
+rf.probs_AVG <- predict(fit_rf_AVG, newdata = x_test_AVG, type="prob")
+predict
+
+rf.ROC_AVG <-  pROC::roc(predictor=rf.probs_AVG$C,
+               response=x_test_AVG$y,
+               levels=rev(levels(x_test_AVG$y)))
+
+# Area under the curve: 0.8857
+
+
+
+plotxrf_AVG <- rev(rf.ROC_AVG$specificities)
+  plotyrf_AVG <- rev(rf.ROC_AVG$sensitivities)
+  
+  interval = 0.2
+  breaks = seq(0, 1, interval)
+
+  ggplot( NULL,aes(x = plotxrf_AVG, y = plotyrf_AVG), color="red") +
+    geom_segment(aes(x = 0, y = 1, xend = 1,yend = 0), alpha = 0.5) + 
+    geom_step()+
+    scale_x_reverse(name = "Specificity",limits = c(1,0), breaks = breaks, expand = c(0.001,0.001)) + 
+    scale_y_continuous(name = "Sensitivity", limits = c(0,1), breaks = breaks, expand = c(0.001, 0.001)) +
+    theme_bw(base_size = 15) + 
+    ggtitle("AUC random forest")+
+    theme(axis.ticks = element_line(color = "grey80")) +
+    coord_equal() + 
+    annotate("text", x = 0.7, y = 0.7, label = paste("AUC =",sprintf("%.3f",rf.ROC_AVG$auc)))
+```
+```{r AUC_SVM, fig.width = 10, fig.height = 5}
+#Draw the ROC curve gbm
+svm.probs_AVG <- predict(fit_svm_AVG, newdata = x_test_AVG, type="prob")
+predict
+
+svm.ROC_AVG <-  pROC::roc(predictor=svm.probs_AVG$C,
+               response=x_test_AVG$y,
+               levels=rev(levels(x_test_AVG$y)))
+
+plotxsvm_AVG <- rev(svm.ROC_AVG$specificities)
+  plotysvm_AVG <- rev(svm.ROC_AVG$sensitivities)
+  
+  interval = 0.2
+  breaks = seq(0, 1, interval)
+
+  ggplot( NULL,aes(x = plotxsvm_AVG, y = plotysvm_AVG)) +
+    geom_segment(aes(x = 0, y = 1, xend = 1,yend = 0), alpha = 0.5) + 
+    geom_step() +
+    scale_x_reverse(name = "Specificity",limits = c(1,0), breaks = breaks, expand = c(0.001,0.001)) + 
+    scale_y_continuous(name = "Sensitivity", limits = c(0,1), breaks = breaks, expand = c(0.001, 0.001)) +
+    theme_bw(base_size = 15) + 
+    ggtitle("AUC svm model")+
+    theme(axis.ticks = element_line(color = "grey80")) +
+    coord_equal() + 
+    annotate("text", x = 0.7, y = 0.7, label = paste("AUC =",sprintf("%.3f",svm.ROC_AVG$auc)))
+```
+
+```{r AUC_GBM, fig.width = 10, fig.height = 5}
+#Draw the ROC curve gbm
+gbm.probs_AVG <- predict(fit_gbm_AVG, newdata = x_test_AVG, type="prob")
+predict
+
+gbm.ROC_AVG <-  pROC::roc(predictor=gbm.probs_AVG$C,
+               response=x_test_AVG$y,
+               levels=rev(levels(x_test_AVG$y)))
+
+plotxgbm_AVG <- rev(gbm.ROC_AVG$specificities)
+  plotygbm_AVG <- rev(gbm.ROC_AVG$sensitivities)
+  
+  interval = 0.2
+  breaks = seq(0, 1, interval)
+
+  ggplot( NULL,aes(x = plotxgbm_AVG, y = plotygbm_AVG)) +
+    geom_segment(aes(x = 0, y = 1, xend = 1,yend = 0), alpha = 0.5) + 
+    geom_step() +
+    scale_x_reverse(name = "Specificity",limits = c(1,0), breaks = breaks, expand = c(0.001,0.001)) + 
+    scale_y_continuous(name = "Sensitivity", limits = c(0,1), breaks = breaks, expand = c(0.001, 0.001)) +
+    theme_bw(base_size = 15) + 
+    ggtitle("AUC gbm model")+
+    theme(axis.ticks = element_line(color = "grey80")) +
+    coord_equal() + 
+    annotate("text", x = 0.7, y = 0.7, label = paste("AUC =",sprintf("%.3f",gbm.ROC_AVG$auc)))
+```
+
+
+
+```{r AUC_all, fig.height=5, fig.width=5}
+gbmroctib_AVG<-tibble(specificities=gbm.ROC_AVG$specificities , sensitivities=gbm.ROC_AVG$sensitivities)%>% mutate(model="GBM")
+lrroctib_AVG<-tibble(specificities=lr.ROC_AVG$specificities , sensitivities=lr.ROC_AVG$sensitivities)%>% mutate(model="LR")
+rfroctib_AVG<-tibble(specificities=rf.ROC_AVG$specificities , sensitivities=rf.ROC_AVG$sensitivities)%>% mutate(model="RF")
+svmroctib_AVG<-tibble(specificities=svm.ROC_AVG$specificities , sensitivities=svm.ROC_AVG$sensitivities)%>% mutate(model="SVM")
+
+Allroctib_AVG<-bind_rows(gbmroctib_AVG,lrroctib_AVG,rfroctib_AVG,svmroctib_AVG)
+Allroctib_AVG%>%
+ ggplot(aes(x = specificities, y = sensitivities) )+
+    geom_segment(aes(x = 0, y = 1, xend = 1,yend = 0), alpha = 0.5) + 
+    geom_step(aes(color=model)) +
+    scale_x_reverse(name = "Specificity",limits = c(1,0), breaks = breaks, expand = c(0.001,0.001)) + 
+    scale_y_continuous(name = "Sensitivity", limits = c(0,1), breaks = breaks, expand = c(0.001, 0.001)) +
+    theme_bw(base_size = 12) + 
+    #ggtitle("ROC models boosting index")+
+    theme(axis.ticks = element_line(color = "grey80")) +
+    coord_equal() + 
+  annotate("text", x = 0.3, y = 0.4, label = paste("AUC LR =",sprintf("%.3f",lr.ROC_AVG$auc))) +
+  annotate("text", x = 0.3, y = 0.3, label = paste("AUC RF =",sprintf("%.3f",rf.ROC_AVG$auc))) +
+  annotate("text", x = 0.3, y = 0.2, label = paste("AUC SVM =",sprintf("%.3f",svm.ROC_AVG$auc))) +
+annotate("text", x = 0.3, y = 0.1, label = paste("AUC GBM =",sprintf("%.3f",gbm.ROC_AVG$auc)))
+```

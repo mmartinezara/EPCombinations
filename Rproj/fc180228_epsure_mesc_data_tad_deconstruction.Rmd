@@ -1,0 +1,977 @@
+---
+title: "EP-SuRE - mESC datasets for TAD deconstruction design(s) + post-processing"
+author: "FC"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: journal #cerulean
+    highlight: monochrome
+    toc: true
+    toc_float: true
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+prefix.lab <- 'mesc_datasets_dload'
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      cache      = TRUE,
+                      cache.path = paste0('cache/', prefix.lab, '/'),
+                      fig.path   = paste0('figures/', prefix.lab, '/'),
+                      dev        = 'png', #set to pdf for LaTeX presentation figures
+                      fig.align  = 'center',
+                      fig.width  = 5,
+                      fig.height = 5)
+```
+
+```{r libs and fun, include = FALSE}
+library(datteRo)
+
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(here)
+library(GEOquery)
+library(UpSetR)
+
+library(GenomicFeatures)
+library(GenomicInteractions)
+library(rtracklayer)
+library(DESeq2)
+
+
+getMetadata <- function(gse) {
+  meta <- GSMList(gse)[[1]]@header
+  tib  <- tibble(geo.accession = meta$geo_accession,
+                 sample.id = meta$title,
+                 instrument = meta$instrument_model,
+                 sra.url = meta$relation[grep('SRA: ', meta$relation)])
+
+  tib %<>%
+    mutate(sra.experiment = sapply(strsplit(sra.url, 'term='), '[', 2)) %>%
+    select(geo.accession, sra.experiment, everything())
+  return(tib)
+}
+
+# function to read soft format metadata and return two mined metadata file for integration with Smk pipelines
+extractMeta <- function(soft.fn, fq.dir, tib.lookup, raw.format = 'fastq.gz', meta.out.fn, meta.out.concat.fn) {
+  
+  # load soft format metadata file
+  gse <- getGEO(filename = soft.fn, GSElimits = NULL, GSEMatrix = TRUE, AnnotGPL = FALSE, getGPL = FALSE)
+  
+  # extract accession, title & tech info
+  tib.meta <- getMetadata(gse)
+  
+  # append sra run
+  tib.meta <- tib.meta %>%
+    left_join(tib.lookup, by = 'geo.accession') %>%
+    select(-sra.experiment.y) %>%
+    select(geo.accession, sra.run, sra.experiment = sra.experiment.x, everything())
+  
+  # concatenate runs for same sample
+  # handles both SE and PE runs:
+  ## create tibble with dumped fq filenames
+  ## splitting at punctuation results in file ending with mate suffix (_1 or _2) for PE runs (mate = 1 for SE runs)
+  tib.sra.run.prefix <- tibble(sra.run.fn = list.files(fq.dir))
+  print(tib.sra.run.prefix)
+  tib.sra.run.prefix <- tib.sra.run.prefix %>%
+    mutate(sra.run = sapply(strsplit(sra.run.fn, '[[:punct:]]'), '[', 1),
+           prefix = sapply(strsplit(sra.run.fn, '\\.'), '[', 1),
+           mate = sapply(strsplit(prefix, '_'), '[', 2)) %>%
+    replace_na(list(mate = "1"))
+
+  # add dumped fq filenames and mate information to metadata
+  tib.meta.concat <- left_join(tib.meta, tib.sra.run.prefix, by = 'sra.run')
+
+  # generate input metadata for concatenating runs
+  tib.meta.concat <- tib.meta.concat %>%
+    group_by(geo.accession, mate) %>%
+    mutate(sample.id = paste0(geo.accession, '_', sample.id, '_', mate),
+           sra.run.files = paste0(sra.run.fn, collapse = ' ')) %>%
+    ungroup %>%
+    select(sample.id, sra.run.files) %>%
+    distinct()
+  
+  # write mined metadata to files
+  write_tsv(tib.meta, path = meta.out.fn)
+  write_tsv(tib.meta.concat, path = meta.out.concat.fn, col_names = FALSE)
+}
+
+# read in collapsed seqmonk output and convert to GenomicInteractions object
+getGI <- function(fn) {
+
+  # read collapsed seqmonk output
+  df <- read.table(fn)
+
+  # anchors as GR --> UCSC chromosome names
+  anchor.1 <- GRanges(df$V1, IRanges(df$V2, df$V3))
+  seqlevelsStyle(anchor.1) <- 'UCSC'
+  anchor.2 <- GRanges(df$V7, IRanges(df$V8, df$V9))
+  seqlevelsStyle(anchor.2) <- 'UCSC'
+
+  # create GI object
+  gi.pchic <- GenomicInteractions(anchor1       = anchor.1,
+                                  anchor2       = anchor.2,
+                                  bait.name     = df$V4,
+                                  otherEnd.name = df$V10,
+                                  counts        = df$V5,
+                                  score         = df$V6)
+
+  # remove trans interactions
+  gi.pchic <- gi.pchic[!is.trans(gi.pchic)]
+
+  return(gi.pchic)
+}
+
+# read in collapsed seqmonk output and convert to GenomicInteractions object
+get_gint_joshi <- function(df, score_col_name) {
+
+  # anchors as GR --> UCSC chromosome names
+  anchor_1 <- GRanges(df[['baitChr']], IRanges(df[['baitStart']], df[['baitEnd']]))
+  anchor_2 <- GRanges(df[['oeChr']], IRanges(df[['oeStart']], df[['oeEnd']]))
+  score    <- df[[score_col_name]]
+
+  # select significant interactions (score >= 5)
+  hits <- ( score >= 5 )
+  
+  # create GI object
+  gi_pchic <- GenomicInteractions(anchor1       = anchor_1[hits],
+                                  anchor2       = anchor_2[hits],
+                                  score         = score[hits])
+  
+  return(gi_pchic)
+}
+
+# Function to read in, resize and reduce DHSs
+# note: homer peak files have metadata in header of size 1 +
+#   grep '#' /home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856456_DNaseI_2i.bed | wc -l
+
+getDHS <- function(dhs.fn, header.size = 36) {
+  dhs <- ChIPseeker::readPeakFile(dhs.fn, skip = header.size)
+  
+  # extend to 150 nt
+  dhs <- resize(dhs, 150, fix = 'center')
+  
+  # merge if closer than 1 nucleosome
+  dhs <- reduce(dhs, min.gapwidth = 150)
+     
+  return(dhs)
+}
+
+# Function to combine DHS replicates
+# Given set of DHS A and B, returns intersection(A, B) U (A/B) U (B/A)
+combineRepl <- function(dhs.1, dhs.2) {
+  int.set <- intersect(dhs.1, dhs.2)
+  sdiff.1 <- subsetByOverlaps(dhs.1, dhs.2, invert = TRUE)
+  sdiff.2 <- subsetByOverlaps(dhs.2, dhs.1, invert = TRUE)
+  
+  out <- c(int.set, sdiff.1, sdiff.2)
+  
+  # resize peaks < 150nt
+  ext.idx <- which(width(out) < 150)
+  out[ext.idx] <- resize(out[ext.idx], 150, fix = 'center')
+  
+  # assign score prop to evidence
+  out$score <- 0.5 * countOverlaps(out, dhs.1) + countOverlaps(out, dhs.2)
+  
+  return(out)
+}
+```
+
+---
+
+## Aims
+
+We plan to deconstruct selected TADs with EP-SuRE and design systematic TAD deconstruction approaches. We will use mouse ESCs (mESCs) as a developmental model system, comparing naive (pre-implantation, E4.5) and primed mESCs (post-implantation: E5.5 and E6.5 (EpiSCs)). Here, we detail all downloaded raw and processed data used for the design, and describe metadata mining for integration with our snakemake analysis workflows. In addition, we detail the post-processing of the results to generate input data sets for the DAT (Deconstruct A TAD) algorithm.
+
+## Data source
+
+1. All raw data from Joshi et al. (2015) Cell Stem Cell [GSE72164](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE72164). These include:
+
+    * DNaseI-seq
+    * ChIP-seq for H3K4me1/me3, H3K27ac and (H3K27me3, currently not processed)
+    * RNA-seq
+    * DHS CHi-C
+
+for [E14-Tg2a](https://www.lgcstandards-atcc.org/Products/All/CRL-1821.aspx?geo_country=nl#generalinformation) mESC cultured in 2i as well as serum-LIF. Note that some experiments (part. CHi-C) have also been performed 1 and 3 days after shifting cells from serum to 2i.
+
+2. All raw data from Factor et al. (2014) Cell Stem Cell (GEO superseries [GSE57409](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE57409). These include
+
+    * DNaseI-seq in mEpiSC9 (129SvEv×ICR, Tesar lab) (GSE57406)
+    * ChIP-seq for H3K4me1/me3, H3K27ac and H3K27me3 in mEpiSC9 (GSE57407)
+    * RNA-seq (GSE57403, currently not processed) for serum-LIF E14-Tg2a mESCs and mEpiSC9
+  
+3. Raw DNaseI-seq profiles for serum E14-Tg2a mESCs, from John Stam's lab (released in 2012 and 2015 as part of ENCODE) [GSE37074::GSM1014154](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM1014154)
+
+4. Significant Promoter CHi-C interactions in serum E14-Tg2a mESCs and embryo-derived 129S2 (Brons et al. 2007) mEpiSC from Novo et al. (2018) Cell Reports [GSE103053](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE103053)
+
+5. TAD coordinates from high-resolution Hi-C in serum E14-Tg2a mESCs from Bonev et al. (2017) Cell ([Table S2](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5651218/bin/mmc2.xlsx)) from Supporting Information, mm10)
+
+6. All raw data from Sherwood et al. (2014) Nat Biotech [GSE53776](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE53776), which provides a DNase-seq time course profiling of serum E14-Tg2a mESCs differentiation to prepancreatic endoderm and intestinal endoderm. The profile include mesendoderm (day 3) and mesoderm and endoderm (day 5).
+
+7. All ChIP-seq raw data from Kagey et al. (2010) Nature [GSE22562](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE22562) in [V6.5 (C57BL/6-129)](https://www.novusbio.com/products/v65-mouse-embryonic-stem-cells_nbp1-41162) mESC cultured in serum.
+
+8. All ChIP-seq raw data from Whyte et al. (2013) Cell [GSE44286](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE44286) in V6.5 mESC cultured in serum.
+
+9. All raw data from Galonska et al. (2015) Cell Stem Cell [GSE56312](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE56312) in [KH2 (C57BL/6 x 129/Sv)](https://web.expasy.org/cellosaurus/CVCL_C317) cultured in serum and in 2i.
+
+10. All raw data from Chen et al. (2008) Cell [GSE11431](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE11431) in E14-Tg2a mESCs cultured in serum.
+
+11. All raw data from Marks et al. (2012) Cell [GSE23943](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE23943) in E14-Tg2a mESCs cultured in serum and in 2i.
+
+## Methods
+
+For large downloads, we used Entrez direct + SRA prefetch. We first downloaded data in sra format and then used a parallelized version of fastq-dump to considerably speed up dumping. Of note, an Aspera client instance would be even faster.
+Metadata in SOFT format were downloaded and mined to generate standard metadata files for our pipeline, adding SRA experiment and SRA run ids using an SRA to GEO lookup table. Raw files were concatenated by biological replicates and systematically renamed according to metadata.
+
+## Data download and metadata mining
+
+#### Joshi et al.
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP062574 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE72164/ --split-3 --gzip; done; rm *.sra
+```
+
+#### Factor et al.
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP041756 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000 &
+esearch -db sra -query SRP041758 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000 &
+esearch -db sra -query SRP041759 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000 &
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE57409 --split-3 --gzip; done; rm *.sra
+```
+
+#### ENCODE
+
+```{bash,eval =F}
+# prefetch data
+esearch -db sra -query SRX191012 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE37074 --split-3 --gzip; done; rm *.sra
+```
+
+#### Novo et al.
+
+Significant CHi-C pairs in Seqmonk format were downloaded to `/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE103053` and converted to a 12 column format to generate BED12 tracks and GenomicInteractions objects
+
+```{bash, eval = FALSE}
+# 6 cols --> 12 cols
+# with process subst
+for f in /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE103053/Chic-seq/*.txt
+do
+  bn=$(basename $f)
+  fn=${bn%%.*}
+  paste <(awk 'NR % 2 == 1' $f) <(awk 'NR % 2 == 0' $f) | cut --complement -f7 > ${fn}_seqmonk_joined.txt
+done
+```
+
+```{r tracks and gi objects, eval = FALSE}
+path <- '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE103053/Chic-seq/'
+
+# generate GenomicInteractions objects
+gi.pchic.esc   <- getGI(paste0(path, 'GSE103053_ESC_complete_merge_step2_seqmonk_seqmonk_joined.txt'))
+gi.pchic.episc <- getGI(paste0(path, 'GSE103053_EpiSC_merge_step2_seqmonk_seqmonk_joined.txt'))
+
+# export GI as BED12
+export.bed12(gi.pchic.esc, fn = paste0(path, 'Tracks/GSE103053_ESC_PCHiC.bed'), score = 'score')
+export.bed12(gi.pchic.episc, fn = paste0(path, 'Tracks/GSE103053_EpiSC_PCHiC.bed'), score = 'score')
+```
+
+```{r save gi objects, eval = FALSE}
+save(list = c('gi.pchic.esc', 'gi.pchic.episc'),
+     file = here('../data/tad_deconstr_design/fc180315_epsure_tadec_pchic_mesc_novo_et_al.RData'))
+```
+
+#### Bonev et al.
+
+TAD coordinates and A/B compartment assignment were downloaded to `/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE96107`. 
+
+#### Sherwood et al.
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP034917 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE53776/ --split-3 --gzip; done; rm *.sra
+```
+
+#### Kagey et al.
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP002778 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE22562/ --split-3 --gzip; done; rm *.sra
+```
+
+#### Whyte et al.
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP018619 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE44286/ --split-3 --gzip; done; rm *.sra
+```
+
+#### Galonska et al.
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP040666 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE56312/ --split-3 --gzip; done; rm *.sra
+```
+
+#### Chen et al. 
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP000217 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE11431/ --split-3 --gzip; done; rm *.sra
+```
+
+### Marks et al.
+
+```{bash, eval = FALSE}
+# prefetch data
+esearch -db sra -query SRP003412 | efetch --format runinfo | cut -d ',' -f 1 | grep SRR | xargs prefetch -p 0.1 --max-size 500000000
+
+# dump to fq
+for file in *.sra; do parallel-fastq-dump --sra-id $file --threads 24 --outdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE23943/ --split-3 --gzip; done; rm *.sra
+```
+
+### Mining metadata
+
+```{bash, eval = FALSE}
+# download metadata
+mkcdir /home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE72nnn/GSE72164/soft/GSE72164_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE57nnn/GSE57409/soft/GSE57409_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE37nnn/GSE37074/soft/GSE37074_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE53nnn/GSE53776/soft/GSE53776_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE22nnn/GSE22562/soft/GSE22562_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE44nnn/GSE44286/soft/GSE44286_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE56nnn/GSE56312/soft/GSE56312_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE11nnn/GSE11431/soft/GSE11431_family.soft.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE23nnn/GSE23943/soft/GSE23943_family.soft.gz
+```
+
+```{r load lookup table, eval = FALSE}
+tib.lookup <- read_tsv('/home/f.comoglio/mydata/SRA/SRR_to_GSM.tab', col_names = FALSE) %>%
+  mutate(sra.run = X1, geo.accession = X10, sra.experiment = X11) %>%
+  select(sra.run, sra.experiment, geo.accession) %>%
+  mutate(geo.accession = sapply(strsplit(geo.accession, '\\.'), '[', 1),
+         geo.accession = sapply(strsplit(geo.accession, '_'), '[', 1))
+```
+
+```{r mine metadata, eval = FALSE}
+# Joshi et al.
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE72164_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Raw/GSE72164', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE72164_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE72164_metadata_concat.tsv')
+
+# Factor et al.
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE57409_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE57409', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE57409_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE57409_metadata_concat.tsv')
+
+# ENCODE
+# required manual curation as biological replicates not specified in metadata from ENCODE
+# and metadata are for entire superseries (only DNase sample retained)
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE37074_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE37074', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE37074_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE37074_metadata_concat.tsv')
+
+# Sherwood et al.
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE53776_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE53776', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE53776_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE53776_metadata_concat.tsv')
+
+# Kagey et al.
+# required manual curation as sample labels were not following good practices
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE22562_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE22562', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE22562_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE22562_metadata_concat.tsv')
+
+# Whyte et al.
+# required manual curation as sample labels were not following good practices
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE44286_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE44286', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE44286_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE44286_metadata_concat.tsv')
+
+# Galonka et al.
+# required manual curation as sample labels were not following good practices for biological replicates
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE56312_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE56312', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE56312_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE56312_metadata_concat.tsv')
+
+# Chen et al.
+# required manual curation as SRR identifiers not present within metadata (data are from 2008)
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE11431_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE11431', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE11431_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE11431_metadata_concat.tsv')
+
+# Marks et al.
+extractMeta(soft.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE23943_family.soft.gz', 
+            fq.dir = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE23943', 
+            tib.lookup = tib.lookup,
+            raw.format = 'fastq.gz',
+            meta.out.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE23943_metadata.tsv', 
+            meta.out.concat.fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE23943_metadata_concat.tsv')
+```
+
+### Concatenating and renaming files
+
+```{bash, eval = FALSE}
+# Joshi et al.
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE72164_metadata_concat.tsv
+rm SRR*
+
+# Factor et al.
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE57409
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE57409_metadata_concat.tsv
+rm SRR*
+
+# ENCODE
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE37074
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE37074_metadata_concat.tsv
+rm SRR*
+
+# Sherwood et al.
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE53776
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE53776_metadata_concat.tsv
+rm SRR*
+
+# Kagey et al.
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE22562
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE22562_metadata_concat.tsv
+rm SRR*
+
+# Whyte et al.
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE44286
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE44286_metadata_concat.tsv
+rm SRR*
+
+# Galonska et al.
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE56312
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE56312_metadata_concat.tsv
+rm SRR*
+
+# Chen et al.
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE11431
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE11431_metadata_concat.tsv
+rm SRR*
+
+# Marks et al.
+cd /home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE23943
+while read id runlist
+do
+  ofn="${id}.fastq.gz"
+  cat ${runlist} > ${ofn}
+done </home/f.comoglio/mydata/Projects/EPmatrix/Pub/Metadata/GSE23943_metadata_concat.tsv
+rm SRR*
+```
+
+## UCSC session and track hubs
+
+An up-to-date UCSC session with all processed data can be accessed at http://genome-euro.ucsc.edu/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=Federico.comoglio&hgS_otherUserSessionName=01_TAD_deconstr_mESC
+
+For records, the following track hubs are hosted on lovelace (/DATA/public):
+
+https://rhpc.nki.nl/lovelace/Hubs/DNase_Joshi_et_al_2015/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/ChIP_Joshi_et_al_2015/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/DNase_JStam/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/ChIP_Factor_et_al_2014/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/DNase_Factor_et_al_2014/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/DNase_Sherwood_et_al_2014/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/ChIP_Kagey_et_al_2010/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/ChIP_Whyte_et_al_2013/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/ChIP_Galonska_et_al_2015/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/ChIP_Chen_et_al_2008/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/ChIP_Marks_et_al_2012/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/RNAseq_Joshi_et_al_2015/hub.txt
+https://rhpc.nki.nl/lovelace/Hubs/RNAseq_Factor_et_al_2014/hub.txt
+
+## Data post-processing
+
+### DHS CHi-C from Joshi et al.
+
+Truncated fastq files and filtered BAM (intermediate HiCUP output files) were removed to free disk space. The remaining files were organized into subdirectories as follows.
+
+```{bash, eval = FALSE}
+resdir=/home/f.comoglio/Pub/GSE72164/Chic-seq/Results/HiCUP
+rm $resdir/*trunc.fastq.gz
+rm $resdir/*.filt.bam
+rm -r $resdir/hicup_filter_ditag_rejects_13-01-58_21-03-2018
+
+mkdir $resdir/Summary $resdir/Plots $resdir/Paired $resdir/Valid
+mv $resdir/*summary* $resdir/Summary
+mv $resdir/*.svg $resdir/Plots
+mv $resdir/*.pair.bam $resdir/Paired
+mv $resdir/*.hicup*.bam $resdir/Valid
+```
+
+Merged BAM files containing the union of valid di-tags from both biological replicates were generated (without deduplication). These were sorted, indexed and tabix indexed.
+
+```{bash, eval = FALSE}
+samtools cat -o $resdir/Valid/GSM1856416_GSM1856417_CHi-C_mESCs_serum_r1_2.hicup.bam $resdir/Valid/GSM1856416_CHi-C_mESCs_serum_BR1_r1_2.hicup.bam $resdir/Valid/GSM1856417_CHi-C_mESCs_serum_BR2_r1_2.hicup.bam
+
+samtools cat -o $resdir/Valid/GSM1856418_GSM1856419_CHi-C_mESCs_2i_r1_2.hicup.bam $resdir/Valid/GSM1856418_CHi-C_mESCs_2i_BR1_r1_2.hicup.bam $resdir/Valid/GSM1856419_CHi-C_mESCs_2i_BR2_r1_2.hicup.bam
+
+# sort merged BAM (indexing)
+sambamba sort --nthreads=16 --out=$resdir/Valid/GSM1856416_GSM1856417_CHi-C_mESCs_serum_r1_2.hicup_sorted.bam $resdir/Valid/GSM1856416_GSM1856417_CHi-C_mESCs_serum_r1_2.hicup.bam
+sambamba sort --nthreads=16 --out=$resdir/Valid/GSM1856418_GSM1856419_CHi-C_mESCs_2i_r1_2.hicup_sorted.bam $resdir/Valid/GSM1856418_GSM1856419_CHi-C_mESCs_2i_r1_2.hicup.bam
+
+# generate tabix files
+python /home/f.comoglio/gitlab/gen-scripts/v4c/hicup_to_v4c.py $resdir/Valid/GSM1856416_GSM1856417_CHi-C_mESCs_serum_r1_2.hicup_sorted.bam
+python /home/f.comoglio/gitlab/gen-scripts/v4c/hicup_to_v4c.py $resdir/Valid/GSM1856418_GSM1856419_CHi-C_mESCs_2i_r1_2.hicup_sorted.bam
+```
+
+### DHS CHi-C baits from Joshi et al.
+
+For DHS CHi-C data, the coordinates of the baited regions were not deposited by the authors. However, in the methods they state that "To improve quality, the whole genome was windowed into 5 DpnII site tiles". Therefore, we extracted these baited regions from the combined CHiCAGO significant interactions file (mm9) at  [GSE72164](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE72164).
+
+```{bash, eval = FALSE}
+odir=/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited
+cut -f1-3 $odir/GSE72164_Hi-C_Merged_interactions_intervals.txt | sort -u | tail -n +2 > $odir/GSE72164_DHS_CHiC_baits_mm9.bed
+```
+
+and lifted over to mm10
+
+```{r dhs chic bait coord, eval = FALSE}
+dhs.chic.baits.mm10 <- liftOver(peakFile = '/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited/GSE72164_DHS_CHiC_baits_mm9.bed', 
+                                chainFile = '/home/f.comoglio/mydata/Annotations/mm9ToMm10.over.chain')
+
+# export to bed track
+# bed is 0-based
+tmp <- dhs.chic.baits.mm10
+start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited/GSE72164_DHS_CHiC_baits_mm10.bed', format = 'bed')
+
+# save object
+save(list = c('dhs.chic.baits.mm10'),
+     file = here('../data/tad_deconstr_design/fc180328_epsure_tadec_dhs_chic_bait_coord_joshi_et_al.RData'))
+```
+
+This bait could be used at a later stage to call significant interactions with CHiCAGO. For the current analyses, the combined CHiCAGO significant interactions file was lifted over to mm10 as follows.
+
+```{sh liftover dhs chic part 1, eval = FALSE}
+odir=/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited
+
+# 0. check that file contains main chr only
+cut -f 1 $odir/GSE72164_Hi-C_Merged_interactions_intervals.txt | sort | uniq
+
+# 1. remove header and add unique row identifier
+cat $odir/GSE72164_Hi-C_Merged_interactions_intervals.txt | tail -n +2 | awk -v OFS='\t' '{print $0,NR}' > $odir/GSE72164_Hi-C_Merged_interactions_intervals_with_row_id.ibed
+
+# 2. extract bait columns and prey columns + row id
+cut -f 1,2,3,23 $odir/GSE72164_Hi-C_Merged_interactions_intervals_with_row_id.ibed > bait_coord_mm9.bed
+cut -f 4,5,6,23 $odir/GSE72164_Hi-C_Merged_interactions_intervals_with_row_id.ibed > prey_coord_mm9.bed
+cut -f 4-23 $odir/GSE72164_Hi-C_Merged_interactions_intervals_with_row_id.ibed > prey_coord_with_scores_mm9.bed
+
+# 3. liftOver to mm10
+liftOver bait_coord_mm9.bed /home/f.comoglio/mydata/Annotations/mm9ToMm10.over.chain bait_coord_mm10.bed unmapped_bait
+liftOver prey_coord_mm9.bed /home/f.comoglio/mydata/Annotations/mm9ToMm10.over.chain prey_coord_mm10.bed unmapped_prey
+
+# check how many rows mapped
+cut -f 4 bait_coord_mm10.bed | uniq | wc -l
+cut -f 4 prey_coord_mm10.bed | uniq | wc -l
+```
+
+```{r liftover dhs chic part 2, eval = FALSE}
+# liftOver expects additional fields to be integers and hence it truncates scores
+# add score to prey file, then reconstruct interaction file
+
+df_bait                 <- read.table('/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited/bait_coord_mm10.bed', as.is = TRUE)
+colnames(df_bait)       <- c('baitChr',	'baitStart',	'baitEnd', 'id')
+df_prey                 <- read.table('/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited/prey_coord_mm10.bed', as.is = TRUE)
+colnames(df_prey)       <- c('oeChr',	'oeStart', 'oeEnd', 'id')
+df_prey_score           <- read.table('/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited/prey_coord_with_scores_mm9.bed', as.is = TRUE)
+colnames(df_prey_score) <- c('oeChr',	'oeStart',	'oeEnd',	'CapC_serum_merged',	'CapC_2i_merged',	'CapC_serum_6608',	'CapC_serum_7940',	'CapC_2i_6609',	'CapC_2i_7941',	'CapC_2i_d1_7942',	'CapC_2i_d3_7924',	'CapC_Eed_8704',	'CapC_serum_6608.chinput',	'CapC_serum_7940.chinput',	'CapC_2i_6609.chinput',	'CapC_2i_7941.chinput',	'CapC_2i_d1_7942.chinput',	'CapC_2i_d3_7924.chinput',	'CapC_Eed_8704.chinput', 'id')
+
+df_int <- left_join(df_bait, df_prey, by = 'id') %>%
+  left_join(dplyr::select(df_prey_score, -c(oeChr, oeStart, oeEnd)), by = 'id') %>%
+  filter(!is.na(baitChr), !is.na(baitStart), !is.na(baitEnd), !is.na(oeChr), !is.na(oeStart), !is.na(oeEnd)) %>%
+  dplyr::select(-id, -contains('chinput'))
+
+# write to file
+write.table(df_int, file = '/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited/GSE72164_Hi-C_Merged_interactions_intervals_mm10.txt', 
+            quote = FALSE, sep = '\t', row.names = FALSE, col.names = TRUE)
+
+# get GInteraction object
+gi_dhs_chic_joshi_2i    <- get_gint_joshi(df_int, score_col_name = 'CapC_2i_merged') 
+gi_dhs_chic_joshi_serum <- get_gint_joshi(df_int, score_col_name = 'CapC_serum_merged') 
+
+# export GI as BED12
+export.bed12(gi_dhs_chic_joshi_2i, 
+             fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE72164/Chic-seq/Tracks/GSE72164_DHS_CHiC_Joshi_mESC_2i.bed', score = 'score')
+export.bed12(gi_dhs_chic_joshi_serum, 
+             fn = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE72164/Chic-seq/Tracks/GSE72164_DHS_CHiC_Joshi_mESC_serum.bed', score = 'score')
+
+# load all bait coordinates
+df <- read.table('/home/f.comoglio/Pub/GSE72164/Chic-seq/Author_deposited/GSE72164_DHS_CHiC_baits_mm10.bed', as.is = TRUE)[, 1:3]
+colnames(df) <- c('seqnames', 'start', 'end')
+gr_dhs_baits <- as(df, 'GRanges')
+```
+
+```{r save gi objects joshi, eval = FALSE}
+save(list = c('gi_dhs_chic_joshi_2i', 'gi_dhs_chic_joshi_serum', 'gr_dhs_baits'),
+     file = here('../data/tad_deconstr_design/fc180904_epsure_tadec_dhs_chic_mesc_joshi_et_al.RData'))
+```
+
+### TAD coordinates from Bonev et al.
+
+A BED file and a GRanges object with TAD coordinates were generated as follows.
+
+```{r tad coord, eval = FALSE}
+gr.tad.esc <- readxl::read_xlsx('/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE96107/Hi-c/1-s2.0-S0092867417311376-mmc2.xlsx') %>%
+  dplyr::rename(seqnames = chrom) %>%
+  as('GRanges')
+
+# export to bed track
+# bed is 0-based
+tmp <- gr.tad.esc
+start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE96107/Hi-c/Tracks/GSE96107_mESC_TAD_coord.bed', format = 'bed')
+
+# save object
+save(list = c('gr.tad.esc'),
+     file = here('../data/tad_deconstr_design/fc180319_epsure_tadec_tad_coord_mesc_bonev_et_al.RData'))
+```
+
+### DHS mining (all DNase experiments)
+
+We generated two sets of DHS while optimizing DAT:
+
+* Relaxed, all detected DHSs
+* Stringent, only DHSs with p-value for local signal enrichment over estimated background of <= 1e-10
+
+#### Relaxed set
+
+```{r dhs mining}
+dhs.2i           <- getDHS('/home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856456_DNaseI_2i.bed')
+# dhs.serum.joshi  <- getDHS('/home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856455_DNaseI_serum.bed')
+
+dhs.serum.stam.1 <- getDHS('/home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR1.bed')
+dhs.serum.stam.2 <- getDHS('/home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR2.bed')
+
+# combine replicates
+dhs.serum        <- combineRepl(dhs.serum.stam.1, dhs.serum.stam.2)
+
+dhs.mesendo      <- getDHS('/home/f.comoglio/Pub/GSE53776/Dnase-seq/Results/Peaks/peaks_GSM1300603_DNase_mES_Day3_Mesendoderm.bed')
+dhs.meso         <- getDHS('/home/f.comoglio/Pub/GSE53776/Dnase-seq/Results/Peaks/peaks_GSM1300604_DNase_mES_Day5_Mesoderm.bed')
+dhs.endo         <- getDHS('/home/f.comoglio/Pub/GSE53776/Dnase-seq/Results/Peaks/peaks_GSM1300605_DNase_mES_Day5_Endoderm.bed')
+#dhs.intest       <- getDHS('/home/f.comoglio/Pub/GSE53776/Dnase-seq/Results/Peaks/peaks_GSM1300606_DNase_mES_Day6_Intestinal_Endoderm.bed')
+#dhs.prepancr     <- getDHS('/home/f.comoglio/Pub/GSE53776/Dnase-seq/Results/Peaks/peaks_GSM1300607_DNase_mES_Day6_Prepancreatic_Endoderm.bed')
+
+# select de novo DHS not detected in 2i/serum
+# useful for visualization
+dhs.devel <- c(dhs.mesendo, dhs.meso, dhs.endo) %>%
+  GenomicRanges::reduce()
+dhs.late  <- subsetByOverlaps(dhs.devel, union(dhs.2i, dhs.serum[, 0]), invert = TRUE)
+```
+
+```{r dhs peak export, echo = FALSE, eval = FALSE}
+# export dhs coordinates to bed track (0-based)
+tmp <- dhs.2i; start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856456_DNaseI_2i_postproc.bed', format = 'bed')
+tmp <- dhs.serum.joshi; start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856455_DNaseI_serum_postproc.bed', format = 'bed')
+tmp <- dhs.serum; start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_postproc.bed', format = 'bed')
+tmp <- dhs.late; start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/Pub/GSE53776/Dnase-seq/Results/Peaks/peaks_GSM1300603_DNase_devel_late_postproc.bed', format = 'bed')
+```
+
+```{r upset plot dhs, fig.width = 8}
+dhs.grl <- GRangesList('2i' = dhs.2i, 'serum' = dhs.serum[, 0], 'mesendo' = dhs.mesendo, 
+                       'meso' = dhs.meso, 'endo' = dhs.endo)
+master.set <- reduce(unlist(dhs.grl))
+
+#compute olap --> format for upset (data frame)
+olap.df    <- sapply(dhs.grl, function(gr) master.set %over% gr %>% as.numeric) %>% as.data.frame
+
+upset(data = olap.df,
+      nsets = ncol(olap.df),
+      keep.order = TRUE,
+      order.by = c('freq'),
+      sets = c('2i', 'serum', 'mesendo', 'meso', 'endo'),
+      nintersects = 20,
+      queries = list(list(query = intersects, params = list('2i', 'serum'), color = "orange", active = TRUE)))
+```
+
+```{r save dhs objects, eval = FALSE}
+# save object
+save(list = c('dhs.2i', 'dhs.serum', 'dhs.mesendo', 'dhs.endo', 'dhs.meso'),
+     file = here('../data/tad_deconstr_design/fc180329_epsure_tadec_dhs_coord.RData'))
+```
+
+#### Stringent set
+
+```{sh dhs mining stringent, eval = FALSE}
+# filter by p-val <= 1e-10
+tail -n +36 /home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856456_DNaseI_2i.txt | awk '{ if ($10 <= 1e-10) { print } }' | cut -f 2,3,4 | sort -k1,1 > /home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856456_DNaseI_2i_stringent.bed
+
+tail -n +36 /home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR1.txt | awk '{ if ($10 <= 1e-10) { print } }' | cut -f 2,3,4 | sort -k1,1 > /home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR1_stringent.bed
+
+tail -n +36 /home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR2.txt | awk '{ if ($10 <= 1e-10) { print } }' | cut -f 2,3,4 | sort -k1,1 >  /home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR2_stringent.bed
+```
+
+```{r dhs mining stringent robj, eval = FALSE}
+dhs.2i           <- getDHS('/home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856456_DNaseI_2i_stringent.bed', header.size = 0)
+dhs.serum.stam.1 <- getDHS('/home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR1_stringent.bed', header.size = 0)
+dhs.serum.stam.2 <- getDHS('/home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_BR2_stringent.bed', header.size = 0)
+
+# combine replicates
+dhs.serum        <- combineRepl(dhs.serum.stam.1, dhs.serum.stam.2)
+```
+
+```{r dhs peak export stringent, echo = FALSE, eval = FALSE}
+# export dhs coordinates to bed track (0-based)
+tmp <- dhs.2i; start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/Pub/GSE72164/Dnase-seq/Results/Peaks/peaks_GSM1856456_DNaseI_2i_postproc_stringent.bed', format = 'bed')
+tmp <- dhs.serum; start(tmp) <- start(tmp) + 1
+rtracklayer::export(tmp, con = '/home/f.comoglio/Pub/GSE37074/Dnase-seq/Results/Peaks/peaks_GSM1014154_UW_DnaseSeq_ES-E14_E0_129_Ola_postproc_stringent.bed', format = 'bed')
+```
+
+```{r save dhs objects stringent, eval = FALSE}
+# save object
+save(list = c('dhs.2i', 'dhs.serum'),
+     file = here('../data/tad_deconstr_design/fc180410_epsure_tadec_dhs_coord_stringent.RData'))
+```
+
+
+### ChIP-seq peak set (Chen et al.)
+
+```{sh, eval = FALSE}
+# peak calling
+cd /home/f.comoglio/Pub/GSE11431/Chip-seq/Results/Homer
+
+batchParallel.pl findPeaks homer.peaks -style factor -i GSM288358_ES_GFP -f GSM288345_ES_Nanog GSM288347_ES_Sox2 GSM288349_ES_E2f1 GSM288351_ES_CTCF GSM288353_ES_STAT3 GSM288355_ES_Esrrb  GSM288357_ES_n-Myc GSM288359_ES_p300 GSM288346_ES_Oct4 GSM288348_ES_Smad1 GSM288350_ES_Tcfcp2I1 GSM288352_ES_Zfx GSM288354_ES_Klf4 GSM288356_ES_c-Myc GSM288360_ES_Suz12
+
+for f in *.peaks; do
+ trackname=${f%%.*} # take prefix
+ pos2bed.pl -bed -track $trackname $f
+done
+
+mkdir Peaks
+mv *.peaks *.bed Peaks/
+
+# peaks are in /home/f.comoglio/Pub/GSE11431/Chip-seq/Results/Homer/Peaks
+```
+
+```{r chipseq peaks to grl, eval = FALSE}
+fn_vec <- list.files('/home/f.comoglio/Pub/GSE11431/Chip-seq/Results/Homer/Peaks', pattern = '*.bed', full.names = TRUE)
+
+tf_names <- str_remove(fn_vec, '.*_') %>%
+  str_remove('.bed') %>%
+  str_replace('-', '') %>%
+  toupper() %>%
+  paste0('_ChIP')
+
+grl_tf_chip_chen <- purrr::map(.x = fn_vec, .f = function(fn) homer_bed_to_gr(fn)) %>%
+  GRangesList
+
+names(grl_tf_chip_chen) <- tf_names
+````
+
+```{r save chipseq peaks objects, eval = FALSE}
+# save object
+save(list = c('grl_tf_chip_chen'),
+     file = here('../data/tad_deconstr_design/fc180924_chipseq_chen_et_al_grl.RData'))
+```
+
+
+## Gencode annotations - R objects
+
+```{r make gencode db, eval = FALSE}
+# make gencode db from GTF file
+gencode.db <- makeTxDbFromGFF(file = '~/mydata/Annotations/Genomes/mm10_gencode_v_m16/gencode.vM16.annotation.gtf', 
+                              format = 'gtf', 
+                              organism = 'Mus musculus', 
+                              dataSource = 'gencode.vM16')
+
+# save db
+saveDb(gencode.db, file = '~/mydata/Annotations/mm10_gencode_v_m16.sqlite')
+
+# extract gene promoters --> resize to TSS
+#gencode.tss <- gencode.db %>%
+#  genes %>%
+#  promoters(0, 1) %>%
+#  unique
+
+#save(list = c('gencode.tss'),
+#     file = here('../data/tad_deconstr_design/fc180402_epsure_tadec_gencode_tss.RData'))
+
+# generate lookup tibble (gencode id to gene symbols)
+# filter for protein coding genes and lincRNAs
+gtf <- readGFF('~/mydata/Annotations/Genomes/mm10_gencode_v_m16/gencode.vM16.annotation.gtf')
+gtf %<>% filter(type == 'gene', 
+                gene_type %in% c('protein_coding', 'lincRNA'))
+
+tib.gencode.lookup <- tibble(gene_id = gtf$gene_id, 
+                             gene_name = gtf$gene_name, 
+                             seqnames = gtf$seqid, 
+                             start = gtf$start, 
+                             end = gtf$end,
+                             strand = gtf$strand) %>%
+  distinct
+
+# save tibble
+save(list = c('tib.gencode.lookup'),
+     file = here('../data/tad_deconstr_design/fc180402_epsure_tadec_gencode_lookup_tibble_pcod_lnc.RData'))
+
+# extract protein coding/lincRNA gene promoters --> resize to TSS
+pcod.linc.genes <- tib.gencode.lookup %>% 
+  as('GRanges')
+
+# extract gene promoters --> resize to TSS
+pcod.linc.tss <- pcod.linc.genes %>%
+  promoters(0, 1) %>%
+  unique
+
+save(list = c('pcod.linc.tss'),
+     file = here('../data/tad_deconstr_design/fc180404_epsure_tadec_gencode_pcod_linc_tss.RData'))
+```
+
+
+## Gene expression tables
+
+Gene expression count tables were generated from RNA-seq data by Joshi et al. (2i and serum). Two types of normalized counts were considered: rlog and rpkm.
+
+```{r generate expression tables joshi}
+# load DB
+gencode_db <- loadDb(file = '~/mydata/Annotations/mm10_gencode_v_m16.sqlite')
+
+# load protein coding gene annotation
+load(here('../data/tad_deconstr_design/fc180402_epsure_tadec_gencode_lookup_tibble_pcod_lnc.RData'))
+tib.gencode.lookup
+
+exons_by_gene <- exonsBy(gencode_db, 'gene')
+
+# define conditions
+condition <- factor(c(rep('serum', 2), rep('twoi', 2)))
+col_data  <- data.frame(condition = condition)
+
+# load counts
+counts    <- read.table('/home/f.comoglio/mydata/Projects/EPmatrix/Pub/GSE72164/Rna-seq/Results/Star/count_table.tsv', row.names = 1, header = TRUE)
+colnames(counts)   <- paste0(condition, '_', 1:2)
+rownames(col_data) <- colnames(counts)
+
+# order according to gene ID in counts
+exons_by_gene <- exons_by_gene[rownames(counts), ]
+
+# create DESeq object
+dds <- DESeqDataSetFromMatrix(countData = counts, 
+                              colData   = col_data, 
+                              design    = ~condition, 
+                              rowRanges = exons_by_gene)
+
+# normalize to rlog
+rlog <- rlog(dds, blind = TRUE)	
+rlog <- assay(rlog)
+
+# normalize to rpkm
+fpkm <- fpkm(dds, robust = TRUE)	
+
+# format normalized counts
+tib_rlog_joshi <- as.tibble(rlog, rownames = 'gene_id')
+tib_fpkm_joshi <- as.tibble(fpkm, rownames = 'gene_id')
+
+# add metadata
+tib_rlog_joshi <- tib_rlog_joshi %>%
+  left_join(tib.gencode.lookup, by = 'gene_id') %>%
+  dplyr::select(gene_id, symbol = gene_name, seqnames, start, end, strand, everything()) %>% 
+  mutate(symbol = str_to_upper(symbol)) %>%
+  filter(!is.na(symbol))
+
+tib_fpkm_joshi <- tib_fpkm_joshi %>%
+  left_join(tib.gencode.lookup, by = 'gene_id') %>%
+  dplyr::select(gene_id, symbol = gene_name, seqnames, start, end, strand, everything()) %>% 
+  mutate(symbol = str_to_upper(symbol)) %>%
+  filter(!is.na(symbol))
+```
+
+```{r save expression tables joshi}
+save(list = c('tib_rlog_joshi', 'tib_fpkm_joshi'), file = here('../data/tad_deconstr_design/fc181121_epsure_tadec_rnaseq_expr_joshi.RData'))
+```
+
+
+## SessionInfo
+
+```{r}
+devtools::session_info()
+```

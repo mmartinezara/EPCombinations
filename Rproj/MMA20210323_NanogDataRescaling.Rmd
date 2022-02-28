@@ -1,0 +1,135 @@
+---
+title: "MMA20210323_NanogDataRescaling"
+author: "MMA"
+date: "24/3/2021"
+output: html_document
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE, 
+                      message    = FALSE, 
+                      warning    = FALSE, 
+                      cache      = TRUE,
+                      autodep    = TRUE,
+                      fig.align  = 'center', 
+                      fig.width  = 6, 
+                      fig.height = 6)
+```
+
+```{r libs and fun}
+library(tidyverse)
+library(here)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(gridExtra)
+library(pander)
+library(cowplot)
+library(circlize)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+library(heatmaply)
+library(scales)
+
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering visualization
+library(dendextend) # for comparing two dendrograms
+
+```
+# Intro
+
+* Normalise to Global effect of Enhancers.
+* Normalise to per Promoter effect of Enhancers.
+
+# Load data
+
+```{r}
+# Load processed data for upstream and downstream Klf2 and Nanog
+load('~/mydata/GitHub/EPCombinations/data/MMA20200804_NCKlf2Nanog_EPSuRE_v3_B3_v4.RData')
+```
+
+```{r}
+tib_comb_nanog_processed_v4B3Class<-tib_comb_nanog_processed_v4B3%>%
+  mutate(class1= ifelse(substring(frag1, 1, 1)=="P", "P", ifelse(frag1=="eempty", "e", "E")))%>%
+  mutate(class2= ifelse(substring(frag2, 1, 1)=="P", "P", ifelse(frag2=="eempty", "e", "E")))%>%
+  mutate(class=paste0(class1,class2))%>%
+  mutate(id1=paste0(frag1,strand1))%>%
+  mutate(id2=paste0(frag2,strand2))
+```
+
+
+
+```{r}
+#calculate general EP boost deviation 
+tib_comb_nanog_processed_v4B3Class%>%
+  filter(!boost_all%in%c(Inf,-Inf, NA))%>%
+  group_by(class)%>%
+  summarise(median(boost_all), mean(boost_all))
+
+#adjust
+tib_comb_nanog_processed_v4B3Class<- tib_comb_nanog_processed_v4B3Class%>%
+  #filter(!class=="ee")%>%
+  mutate(adjBoostmedEP=boost_all+0.05)
+#adjust by med EP per promoter
+BasalMedianUPNanog<-tib_comb_nanog_processed_v4B3Class %>%
+  filter(class=="EP")%>%
+  group_by(id2)%>%
+  summarise(Basal_median=median(activity_all), Nbasal=n())
+
+allcomb_NanogAdj_all<-left_join(tib_comb_nanog_processed_v4B3Class,BasalMedianUPNanog, by="id2")%>%
+  mutate(BoostPerPmed=log2(activity_all/Basal_median))
+
+```
+
+```{r, fig.height=7,fig.width=15}
+allcomb_NanogAdj_all%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,log2(activity_all)))+
+  geom_violin(aes(fill=id2))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 3. General EP effect. ")+
+  theme_bw(base_size = 12)
+```
+
+```{r, fig.height=7,fig.width=15}
+allcomb_NanogAdj_all%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,boost_all))+
+  geom_violin(aes(fill=id2))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 3. General EP effect. ")+
+  theme_bw(base_size = 12)
+```
+
+
+```{r, fig.height=7,fig.width=15}
+allcomb_NanogAdj_all%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,adjBoostmedEP))+
+  geom_violin(aes(fill=id2))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 3. General EP effect. ")+
+  theme_bw(base_size = 12)
+```
+
+```{r, fig.height=7,fig.width=15}
+allcomb_NanogAdj_all%>%
+  filter(Nbasal>10)%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,BoostPerPmed))+
+  geom_violin(aes(fill=id2))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 4. Per P EP effect. EPs")+
+  theme_bw(base_size = 12)
+```
+
+# Save clusters and normalisations
+```{r}
+allKlfcombNCAdj_all
+
+save(list = c('allcomb_NanogAdj_all' ),
+     file = -+'~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Nanog.RData')
+```

@@ -1,0 +1,618 @@
+---
+title: "Figure4_EPcombinations"
+author: "MMA"
+date: "2/4/2020"
+output:
+  pdf_document:
+    fig_caption: yes
+    toc: yes
+  html_document: 
+    toc: yes
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/Figure4/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(ggbeeswarm)
+library(onewaytests)
+```
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitHub/EPCombinations/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="klf2")%>%
+  mutate(id1=paste0(frag1,strand1))%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+```
+
+
+# Correlation mean boost vs boost
+## Both orientations
+```{r General_effect_enhancers, fig.width = 5, fig.height = 5}
+meanboostperE<-all_comball%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+  group_by(frag1)%>%
+  summarise(meanboost=mean(BoostPerPmed),n=n())
+
+all_comball%>%
+  filter(class=="EP")%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+  left_join(meanboostperE)%>%
+  filter(n>5)%>%
+  #filter(log2(activity_all)>-1)%>%
+  ggplot(aes(meanboost,BoostPerPmed))+
+  geom_point(size=0.5, alpha=0.5)+
+  #stat_cor()+
+  stat_cor()+
+  xlab("meanboost Enhancer (log2)")+
+  ggtitle("General effect candidate enhancer")+
+  geom_smooth(method="lm")+
+  theme_bw()+
+  labs(caption = "EP (n=9418), E (n=304)")+
+  ylab("Boost index (log2)")+
+  xlab("General effect candidate Enhancer (log2)")
+  
+
+
+```
+```{r General_effect_enhancers2, fig.width = 5, fig.height = 5}
+
+
+all_comball%>%
+  filter(class=="EP")%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+  left_join(meanboostperE)%>%
+  filter(n>5)%>%
+  #filter(log2(activity_all)>-1)%>%
+  filter(meanboost>1)%>%
+  ggplot(aes(meanboost,BoostPerPmed))+
+  geom_point(size=0.5, alpha=0.5)+
+  #stat_cor()+
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))+
+  xlab("meanboost Enhancer (log2)")+
+  ggtitle("General Effect Highly Active Enhancers")+
+  geom_smooth(method="lm")+
+  theme_bw()+
+  labs(caption = "EP (n=1,563), E (n=46)")+
+  ylab("Boost index (log2)")+
+  xlab("General effect Enhancer (log2)")
+  
+
+
+```
+
+## AVG
+```{r General_effect_enhancers_AVG, fig.width = 5, fig.height = 5}
+meanboostperE<-all_comball%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+  group_by(frag1)%>%
+  summarise(meanboost=mean(BoostPerPmed),n=n())
+
+all_comball%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+  group_by(frag1, frag2)%>%
+  summarise(BoostPerPmedAvgOrien=mean(BoostPerPmed))%>%
+  left_join(meanboostperE)%>%
+  filter(n>5)%>%
+  #filter(log2(activity_all)>-1)%>%
+  ggplot(aes(meanboost,BoostPerPmedAvgOrien))+
+  geom_point(size=0.5, alpha=0.5)+
+  #stat_cor()+
+  stat_cor()+
+  xlab("meanboost Enhancer (log2)")+
+  ggtitle("General effect candidate enhancer")+
+  geom_smooth(method="lm")+
+  theme_bw()+
+  labs(caption = "EP (n=3342), E (n=304)")+
+  ylab("Boost index (log2)")+
+  xlab("General effect candidate Enhancer (log2)")
+  
+
+
+```
+
+
+## Assumption of equal variances within groups
+
+```{r, fig.width=25, fig.height=5}
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  rowwise()%>%
+  mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  filter(DAT=="klf2")%>%
+  ggplot(aes(id1, log10(BiolVar)))+
+   geom_quasirandom()
+  
+```
+
+```{r, fig.width=5, fig.height=5}
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  rowwise()%>%
+  mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  filter(id1%in%c("E097-_Klf2","E046+_Klf2","E070+_Klf2" ))%>%
+  #filter(DAT=="klf2")%>%
+  ggplot(aes(id1, log10(BiolVar)))+
+   geom_quasirandom()
+  
+```
+```{r, fig.width=25, fig.height=5}
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  rowwise()%>%
+  mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  filter(DAT=="klf2")%>%
+  ggplot(aes(id2, log10(BiolVar)))+
+   geom_quasirandom()
+  
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  rowwise()%>%
+  mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  filter(DAT=="klf2")%>%
+  filter(id2=="P003+")%>%
+  ggplot(aes(id2, (BiolVar)))+
+   geom_quasirandom()
+
+```
+
+We indeed see that the variances between groups are very wild in the enhancers. Thus we can't use the ANOVA test.
+
+## normality of variances within groups 
+```{r, fig.width=10, fig.height=5}
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  #rowwise()%>%
+  #mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  select(id1, frag2, id,BoostPerPmed1, BoostPerPmed2, BoostPerPmed3 )%>%
+  pivot_longer(BoostPerPmed1:BoostPerPmed3, names_to = "rep", values_to = "BoostAll")%>%
+  #filter(DAT=="klf2")%>%
+  filter(id1=="E046+_Klf2")%>%
+  ggplot(aes(frag2, BoostAll))+
+   geom_quasirandom()
+
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  #rowwise()%>%
+  #mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  select(id1, frag2, id,BoostPerPmed1, BoostPerPmed2, BoostPerPmed3 )%>%
+  pivot_longer(BoostPerPmed1:BoostPerPmed3, names_to = "rep", values_to = "BoostAll")%>%
+  #filter(DAT=="klf2")%>%
+  filter(id1=="E097-_Klf2")%>%
+  ggplot(aes(frag2, BoostAll))+
+   geom_quasirandom()
+
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  #rowwise()%>%
+  #mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  select(frag1,id1, frag2, id,BoostPerPmed1, BoostPerPmed2, BoostPerPmed3 )%>%
+  pivot_longer(BoostPerPmed1:BoostPerPmed3, names_to = "rep", values_to = "BoostAll")%>%
+  #filter(DAT=="klf2")%>%
+  filter(frag1=="E070_Klf2")%>%
+  ggplot(aes(frag2, BoostAll))+
+   geom_quasirandom()
+  
+all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  #rowwise()%>%
+  #mutate(BiolVar=var(c(BoostPerPmed1,BoostPerPmed2, BoostPerPmed3)))%>%
+  select(frag1,id1, frag2, id,BoostPerPmed1, BoostPerPmed2, BoostPerPmed3 )%>%
+  pivot_longer(BoostPerPmed1:BoostPerPmed3, names_to = "rep", values_to = "BoostAll")%>%
+  #filter(DAT=="klf2")%>%
+  filter(frag1=="E030_Klf2")%>%
+  ggplot(aes(frag2, BoostAll))+
+   geom_quasirandom()
+  
+```
+
+
+
+## Welch test Orientation AVG enhancers
+
+Same but taking both orientations of enhancers.
+
+```{r}
+##Neccessary chunk moved around
+VarPErE_AvgOr_within<-all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id1=paste0(id1,"_", DAT))%>%
+     filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3), names_to = "rep", values_to = "BoostperPmedall")%>%
+  group_by(frag1, id2)%>%
+  summarise(BiolVarAvgOr_within=var(BoostperPmedall), nrep=n())%>%
+  filter(!BiolVarAvgOr_within%in%c(NA,NaN,Inf,-Inf))%>%
+  ungroup()%>%
+  group_by(frag1)%>%
+  summarise(n2=n(),WithinVariance=sum(BiolVarAvgOr_within)/n2, k=sum(nrep))
+  
+
+VarPErE_AvgOr_between<-all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+    mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  group_by(frag1, id2)%>%
+  summarise(BoostPerPmedAvgOr=mean(BoostPerPmed))%>%
+  ungroup()%>%
+  group_by(frag1)%>%
+  summarise(variance=var(BoostPerPmedAvgOr), n=n())%>%
+  left_join(VarPErE_AvgOr_within)%>%
+  mutate(axis="y(enhancers)")%>%
+  filter(!variance%in%c(NA,NaN,Inf,-Inf))%>%
+  filter(!WithinVariance%in%c(NA,NaN,Inf,-Inf))%>%
+  filter(n>5)%>%
+  mutate(p_pvalue= pf(variance/WithinVariance, n-1, k-n, lower.tail = FALSE))%>%
+  mutate(correctedPvalue=p.adjust(p_pvalue, "BH"))
+```
+
+
+```{r include=FALSE}
+## Alternative F test to ANOVA Welch F test used when data is heterocedastic as it is our case.
+
+
+forWelch<-all_comball%>% 
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+    mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%  
+   mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+    mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+    mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+  mutate(activity_all=log2(activity_all))%>%
+  pivot_longer(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3), names_to = "rep", values_to = "BoostperPmedall")%>%
+  filter(frag1%in%VarPErE_AvgOr_between$frag1)
+
+
+WelchTestEnhancers<-tibble(frag1=NA, pvalue=NA, fstatistic=NA, df1=NA, df2=NA )
+
+for (i in unique(forWelch$frag1)) {
+  wFtest<-forWelch%>%
+    filter(frag1==i)%>%
+    welch.test(BoostperPmedall ~ frag2, data = .)
+  
+  WelchTestEnhancers<-WelchTestEnhancers%>%
+    add_row(frag1=i, pvalue=wFtest$p.value, fstatistic=wFtest$statistic, df1=wFtest$parameter[1], df2=wFtest$parameter[2])
+}
+
+### Both seem to work better than the anova as they pick up more significant cases than the Anova
+```
+
+
+
+
+```{r}
+WelchTestEnhancers%>%
+  ggplot(aes(pvalue))+
+  geom_histogram()
+
+```
+
+
+```{r}
+#WelchTestEnhancers%>%
+#    mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+#  mutate(DAT=sapply(str_split(frag1, "_"), function(x) x[2]))%>%
+#  filter(DAT=="klf2")%>%
+#  arrange(frag1)
+
+WelchTestEnhancers%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  ggplot(aes(Axis, log10(fstatistic)))+
+  geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.01))+
+  theme_bw()
+```
+```{r Fstatistic_vs_MeanBoost, fig.height=5, fig.width=8}
+#WelchTestEnhancers%>%
+#    mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+#  mutate(DAT=sapply(str_split(frag1, "_"), function(x) x[2]))%>%
+#  filter(DAT=="klf2")%>%
+#  arrange(frag1)
+VarPErE_AvgOr_onlyVar<-all_comball%>% 
+  ungroup()%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+    mutate(id1=paste0(id1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+    mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>% 
+  group_by(id2,frag1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed),activity_all_frag2=mean(activity_all_frag2),activity_all_frag1=mean(activity_all_frag1),class=unique(class))%>%
+  group_by(frag1)%>%
+  summarise(variance=var(BoostPerPmed), nsize=n(), meanboost=mean(BoostPerPmed))
+
+#VarPErE_AvgOr_onlyVar<-VarPErE_AvgOr_between%>%dplyr::select(variance, frag1)
+
+all_comball%>% 
+ungroup()%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  #filter(log2(activity_all_frag2)>-1)%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+    mutate(id1=paste0(id1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+    mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>% 
+    filter(frag1=="E030_klf2")
+
+WelchTestEnhancers%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  left_join(VarPErE_AvgOr_onlyVar, by=c("frag1"))%>%
+  ggplot(aes(meanboost, log10(fstatistic), color=CorrPvalue<0.05))+
+  #geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.05))+
+  geom_point(aes(size=nsize), alpha=0.5)+
+  theme_bw()+
+  labs(caption = "233 cRE (combinations>5)")
+```
+```{r Variance_vs_MeanBoost, fig.height=5, fig.width=8}
+WelchTestEnhancers%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  left_join(VarPErE_AvgOr_onlyVar, by=c("frag1"))%>%
+  ggplot(aes(meanboost, log10(variance), color=CorrPvalue<0.05))+
+  #geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.05))+
+  geom_point(aes(size=nsize), alpha=0.5)+
+  theme_bw()
+
+```
+```{r }
+WelchTestEnhancers%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(significant=ifelse(CorrPvalue<0.05,1,0))%>%
+  filter(!is.na(significant))%>%
+  summarise(n=n(), PercSig=sum(significant)/n, nsignif=sum(significant))
+```
+
+
+```{r BarplotVariancepvalue1, fig.height=10, fig.width=5}
+WelchTestEnhancers%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  left_join(VarPErE_AvgOr_onlyVar, by=c("frag1"))%>%
+  mutate(DAT=sapply(str_split(frag1, "_"), function(x) x[2]))%>%
+  mutate(frag1=sapply(str_split(frag1, "_"), function(x) x[1]))%>% 
+  filter(DAT=="klf2")%>%
+  ggplot(aes(reorder(frag1, meanboost),meanboost))+
+  #geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.05))+
+  geom_bar(stat="identity")+
+  geom_errorbar( aes(x=reorder(frag1, meanboost), ymin=meanboost-sqrt(variance), ymax=meanboost+sqrt(variance), colour=CorrPvalue<0.05), width=0.4, alpha=0.9, size=1.3)+
+  theme_bw()+
+  labs(caption = "67 Klf2 locus cREs (combinations>5)")+
+  coord_flip()
+```
+
+```{r BarplotVariancepvalue2, fig.height=15, fig.width=7}
+all_comball%>%
+  filter(class=="EP")%>%
+  filter(strand2=="+")%>%
+  mutate(frag1=paste0(frag1,"_", DAT))%>%
+  mutate(frag2=paste0(frag2,"_", DAT))%>%
+  mutate(id2=paste0(id2,"_", DAT))%>%
+  filter(!BoostPerPmed%in%c(NA,NaN,Inf,-Inf))%>%
+     filter(DAT=="klf2")%>%
+  group_by(frag1, frag2)%>%
+  summarise(BoostPerPmedAvgOrien=mean(BoostPerPmed))%>%
+  filter(frag1%in%WelchTestEnhancers$frag1)%>%
+ left_join(WelchTestEnhancers%>%mutate(CorrPvalue=p.adjust(pvalue, "BH")), by=c("frag1"))%>%
+  left_join(VarPErE_AvgOr_onlyVar, by=c("frag1"))%>%
+    mutate(frag1=sapply(str_split(frag1, "_"), function(x) x[1]))%>% 
+  ggplot(aes(reorder(frag1, meanboost),BoostPerPmedAvgOrien, colour=CorrPvalue<0.05))+
+  geom_hline(yintercept = 0, alpha=0.4)+
+  geom_quasirandom(size=1.2, varwidth = TRUE, alpha=0.7)+
+  stat_summary(fun.y = mean, width = 0.5, linetype = "solid", colour="black", geom = "crossbar")+
+  #geom_bar(stat="identity")+
+  #geom_crossbar( aes(x=reorder(frag1, meanboost),y=meanboost, ymin=meanboost-sqrt(variance), ymax=meanboost+sqrt(variance), colour=CorrPvalue<0.05), width=0.4, alpha=0.4, size=0.5)+
+  #geom_crossbar( aes(x=reorder(frag1, meanboost),y=meanboost, ymin=meanboost, ymax=meanboost), colour="black", width=0.4, alpha=1, size=0.5)+
+  #geom_point(aes(reorder(frag1, meanboost),meanboost, colour=CorrPvalue<0.05))+
+  theme_bw(base_size = 15)+
+  labs(caption = "67 Klf2 locus cREs (combinations>5)")+
+  coord_flip()
+
+WelchTestEnhancers%>%
+  mutate(CorrPvalue=p.adjust(pvalue, "BH"))%>%
+  mutate(Axis="enhancers")%>%
+  left_join(VarPErE_AvgOr_onlyVar, by=c("frag1"))%>%
+  mutate(DAT=sapply(str_split(frag1, "_"), function(x) x[2]))%>%
+  mutate(frag1=sapply(str_split(frag1, "_"), function(x) x[1]))%>% 
+  filter(DAT=="klf2")%>%
+  ggplot(aes(reorder(frag1, meanboost),meanboost))+
+  #geom_quasirandom(size=0.5, varwidth = TRUE, dodge.width=0.4,aes(color=CorrPvalue<0.05))+
+  geom_bar(stat="identity")+
+  geom_errorbar( aes(x=reorder(frag1, meanboost), ymin=meanboost-sqrt(variance), ymax=meanboost+sqrt(variance), colour=CorrPvalue<0.05), width=0.4, alpha=0.9, size=1.3)+
+  theme_bw(base_size = 15)+
+  labs(caption = "67 Klf2 locus cREs (combinations>5)")+
+  coord_flip()
+```
+
+
+# Save data
+```{r}
+# save welch selectivity dataset
+
+
+save('WelchTestEnhancers',
+     file = '~/mydata/GitLab/EPCombinations/data/MMA20210811_SelectivityWelchEnh.RData')
+```
+```
+
+
+

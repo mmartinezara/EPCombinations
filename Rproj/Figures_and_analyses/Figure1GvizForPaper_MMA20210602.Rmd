@@ -1,0 +1,237 @@
+---
+title: "GvizForPaper_MMA20210602"
+author: "MMA"
+date: "2/6/2021"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/Figure1V2/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+library(GenomicRanges)
+library(Gviz)
+library(rtracklayer)
+library(biomaRt)
+library(org.Mm.eg.db)
+
+```
+
+# Intro
+This document is intended to generate publication grade genome browser tracks for the EPcombinations paper. The figures here made will be placed in Figure 1.
+
+# Load data and make plots
+```{r}
+load('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/fc180410_epsure_tadec_dhs_coord_stringent.RData')
+
+head(dhs.2i)
+# combine 2i and serum DHS
+dhs.mesc <- IRanges::reduce(c(dhs.2i[,0], dhs.serum[,0]))
+```
+
+
+```{r}
+Klf2EPs<-rtracklayer::import('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_klf2.bed', format = "BED" )
+```
+```{r}
+atrack <- AnnotationTrack(Klf2EPs, name = "Reg Elements", stacking="dense")
+
+gtrack <- GenomeAxisTrack()
+
+DHSs_2i <- AnnotationTrack(dhs.2i%>%as_tibble%>%
+                             filter(seqnames=="chr8"), name = "DHSs 2i",
+                                  chromosome="chr8")
+DHSs_serum <- AnnotationTrack(dhs.serum%>%as_tibble%>%
+                             filter(seqnames=="chr8"), name = "DHSs serum",
+                                  chromosome="chr8")
+#genome : "hg19" 
+gen<-"mm10"
+#Chromosme name : "chr7"
+chr <- "chr8"
+itrack <- IdeogramTrack(genome = gen, chromosome = chr)
+
+data(geneModels)
+head(geneModels)
+plotTracks(list(gtrack, atrack))
+
+library(TxDb.Mmusculus.UCSC.mm10.knownGene) 
+customFromTxDb <- GeneRegionTrack(TxDb.Mmusculus.UCSC.mm10.knownGene,
+                                  chromosome="chr8" ) 
+
+#grtrack <- GeneRegionTrack(geneModels, genome = gen,
+#                           chromosome = chr, name = "Gene Model")
+
+plotTracks(list(itrack, gtrack, atrack,DHSs_2i,DHSs_serum, customFromTxDb), from= 72230000, to=72338000, col = NULL, collapseTranscripts="longest",
+           transcriptAnnotation = "gene")
+```
+
+
+```{r}
+
+
+DHSs_mesc <- AnnotationTrack(dhs.mesc%>%as_tibble%>%
+                             filter(seqnames=="chr8"), name = "DHSs",
+                                  chromosome="chr8")
+
+
+plotTracks(list(itrack, gtrack, atrack,DHSs_mesc, customFromTxDb), from= 72230000, to=72338000, col = NULL, collapseTranscripts="longest",
+           transcriptAnnotation = "gene_id")
+
+#genes(TxDb.Mmusculus.UCSC.mm10.knownGene)
+
+head(gene(customFromTxDb))
+head(transcript(customFromTxDb))
+head(exon(customFromTxDb))
+head(symbol(customFromTxDb))
+
+
+```
+
+```{r}
+#Import DNAse bigwig
+bgFile <- import.bw('/DATA/usr/f.comoglio/Projects/EPmatrix/Pub/GSE72164/Dnase-seq/Results/Tracks/DNase_Joshi_et_al_2015/mm10/GSM1856456_DNaseI_2i.ucsc.bigWig', as="GRanges")
+dTrack2DNAse2i <- DataTrack(range = bgFile, genome = "mm10", type = "hist", 
+                     chromosome = "chr8", name = "DNase I 2i")
+```
+
+
+```{r}
+
+# Process to correct names inspired by from https://jnicolaus.com/tutorials/gviztutorial.html
+
+#Extract transcript Id
+customFromTxDb@range@elementMetadata@listData$transcript<-lapply(str_split(customFromTxDb@range@elementMetadata@listData$transcript,pattern = "\\."), function(x) x[1])
+  
+mouse <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+#Obtain all Gene names to transcript id correspondences
+convertedgenex <- getBM(attributes = c("ensembl_transcript_id", "external_gene_name"),
+                         #filters = "ensembl_transcript_id",
+                         values = c("ENSMUST00000206119"),
+                         mart = mouse)
+
+#Filter to only transctripts found inKlf2 chr
+filtredGeneNames<-convertedgenex%>%
+  as_tibble()%>%
+    filter(ensembl_transcript_id%in%customFromTxDb@range@elementMetadata@listData$transcript)
+
+# Match Transcripts from Klf2 chr to Gene names
+CorrectedGenenames<-as_tibble(as.vector(unlist(customFromTxDb@range@elementMetadata@listData$transcript)))%>%
+  mutate(ensembl_transcript_id=value)%>%dplyr::select(ensembl_transcript_id)%>%
+  left_join(filtredGeneNames, by=c("ensembl_transcript_id"))
+
+#Replace them in object for plotting
+ customFromTxDb@range@elementMetadata@listData$gene<-as.list(CorrectedGenenames$external_gene_name)
+
+```
+
+
+```{r Klf2ZoomIn, fig.height=5, fig.width=10}
+#Plot Zoom in Klf2 region
+plotTracks(list(itrack, gtrack,dTrack2DNAse2i,atrack, customFromTxDb), from= 72230000, to=72338000, col = NULL, collapseTranscripts = "meta" ,transcriptAnnotation = "gene",stackHeight=0.4, fontsize=15)
+```
+
+## Zoom Out
+
+Load TADs info.
+```{r}
+load('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/fc180319_epsure_tadec_tad_coord_mesc_bonev_et_al.RData')
+# convert ensembl id to gene name
+head(gr.tad.esc)
+```
+
+
+### Klf2
+```{r Klf2zoomout, fig.height=3, fig.width=20}
+atrackKlf2 <- AnnotationTrack(Klf2EPs, name = "Reg Elements", stacking="dense", feature=as.vector(Klf2EPs%>%
+                             as_tibble()%>%
+                               .$score), '500'="#FF5D09", '1000'="#3860AA", showOverplotting=FALSE)
+
+TADS_klf2 <- AnnotationTrack(gr.tad.esc%>%
+                             as_tibble()%>%
+                             filter(seqnames=="chr8"), name = "TADs",
+                           chromosome="chr8", feature=as.vector(gr.tad.esc%>%
+                             as_tibble()%>%
+                             filter(seqnames=="chr8")%>%
+                               .$Compartment), A="blue", B="red")
+
+ht <- HighlightTrack(trackList = list(gtrack, TADS_klf2,atrackKlf2, customFromTxDb),
+                     start = 72230000, width = 108000, chromosome = 8)
+
+plotTracks(list(itrack, ht), from= 71860000, to=72785000, col = NULL, collapseTranscripts="longest" , stackHeight=0.7, stacking="dense", fontsize=20)
+```
+
+### Nanog
+```{r}
+
+NanogEPs<-rtracklayer::import('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_nanog.bed', format = "BED" )
+```
+```{r NanogZoomOut, fig.height=3,fig.width=20}
+atrackNanog <- AnnotationTrack(NanogEPs, name = "Reg Elements", stacking="dense", feature=as.vector(NanogEPs%>%
+                             as_tibble()%>%
+                               .$score), '500'="#FF5D09", '1000'="#3860AA", showOverplotting=FALSE)
+
+# Load Nanog design
+
+TADS_Nanog <- AnnotationTrack(gr.tad.esc%>%
+                             as_tibble()%>%
+                             filter(seqnames=="chr6"), name = "TADs",
+                           chromosome="chr6", feature=as.vector(gr.tad.esc%>%
+                             as_tibble()%>%
+                             filter(seqnames=="chr6")%>%
+                               .$Compartment), A="blue", B="red")
+
+chrnanog <- "chr6"
+itracknanog <- IdeogramTrack(genome = gen, chromosome = chrnanog)
+
+
+customFromTxDbNanog <- GeneRegionTrack(TxDb.Mmusculus.UCSC.mm10.knownGene,
+                                  chromosome="chr6" ) 
+
+
+plotTracks(list(itracknanog, gtrack,TADS_Nanog, atrackNanog, customFromTxDbNanog), from= 122250000, to=123350000, col = NULL, collapseTranscripts="longest",stackHeight=0.7, stacking="dense",fontsize=20)
+```
+
+### Tfcp2l1
+
+```{r}
+Tfcp2l1EPs<-rtracklayer::import('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_tfcp2l1.bed', format = "BED" )
+```
+```{r Tfcp2l1ZoomOUT, fig.height=3,fig.width=20}
+atracktfcp2l1 <- AnnotationTrack(Tfcp2l1EPs, name = "Reg Elements", stacking="dense", feature=as.vector(Tfcp2l1EPs%>%
+                             as_tibble()%>%
+                               .$score), '500'="#FF5D09", '1000'="#3860AA", showOverplotting=FALSE)
+
+# Load Nanog design
+
+TADS_tfcp2l1 <- AnnotationTrack(gr.tad.esc%>%
+                             as_tibble()%>%
+                             filter(seqnames=="chr1"), name = "TADs",
+                           chromosome="chr1", feature=as.vector(gr.tad.esc%>%
+                             as_tibble()%>%
+                             filter(seqnames=="chr1")%>%
+                               .$Compartment), A="blue", B="red")
+
+chrtfcp21l <- "chr1"
+itracktfcp2l1 <- IdeogramTrack(genome = gen, chromosome = chrtfcp21l)
+
+
+customFromTxDbTfcp2l1 <- GeneRegionTrack(TxDb.Mmusculus.UCSC.mm10.knownGene,
+                                  chromosome="chr1" ) 
+
+
+plotTracks(list(itracktfcp2l1,gtrack, TADS_tfcp2l1,atracktfcp2l1, customFromTxDbTfcp2l1), from= 117770000, to=120560000, col = NULL, collapseTranscripts="longest",stackHeight=0.7, stacking="dense",fontsize=20, showOverplotting=FALSE) 
+```
+

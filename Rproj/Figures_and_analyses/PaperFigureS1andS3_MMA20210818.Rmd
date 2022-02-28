@@ -1,0 +1,212 @@
+---
+title: "FigureS1and3"
+author: "MMA"
+date: "2/4/2020"
+output:
+  pdf_document:
+    fig_caption: yes
+    toc: yes
+  html_document: 
+    toc: yes
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitHub/EPCombinations/rproj/FiguresPaper/FigureS1/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(dplyr)
+library(GGally)  
+library(ggbeeswarm)
+
+```
+
+
+
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitHub/EPCombinations/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="klf2")%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+
+```
+
+
+```{r CombNrsUpstreamAssay_plot, fig.width = 5, fig.height = 5}
+# To be updated
+
+all_comball%>%
+  filter(class!="ee")%>%
+  distinct(frag1, frag2, DAT, class)%>%
+  group_by(class)%>%
+  summarise(combinations=n())%>%
+  ggplot(aes(class, combinations, fill=class))+
+  geom_bar(stat = "identity")+
+  theme_bw()+
+  scale_y_continuous(limits = c(0, 35000), n.breaks = 6, minor_breaks = waiver())
+
+```
+
+
+# Replicates
+
+```{r reproducibilityReps, fig.height=5, fig.width=5}
+
+
+# Reproducibility between all pairs in the 3 reps Log transformed Klf2
+all_comball%>%
+    filter(DAT%in%c("klf2", "Nanog"))%>%
+    mutate(activity_br1=log2(activity_br1))%>%
+  mutate(activity_br2=log2(activity_br2))%>%
+  mutate(activity_br3=log2(activity_br3))%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18, lower = list(continuous = wrap("points", size=0.05)))+
+  theme_bw()
+
+# Reproducibility between all pairs in the 3 reps Log transformed Tfcp2l1
+all_comball%>%
+  filter(DAT=="Tfcp2l1")%>%
+    mutate(activity_br1=log2(activity_br1))%>%
+  mutate(activity_br2=log2(activity_br2))%>%
+  mutate(activity_br3=log2(activity_br3))%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18, lower = list(continuous = wrap("points" , size=0.05)))+
+  theme_bw()
+
+```
+
+```{r reproducibilityReps_Downstream, fig.height=5, fig.width=5}
+
+
+# Reproducibility between all pairs in the 3 reps Log transformed
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+    mutate(activity_br1=log2(activity_br1))%>%
+  mutate(activity_br2=log2(activity_br2))%>%
+  mutate(activity_br3=log2(activity_br3))%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+  ggpairs(columns =16:18, lower = list(continuous = wrap("points", size=0.1)))+
+  theme_bw()
+
+```
+
+# Boosting vs promoter activity
+
+```{r}
+Averagedboost<-all_comball%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1))%>%
+  #mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(class=="EP")%>%
+  group_by(id2,id1,DAT)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed),activity_all_frag2=mean(activity_all_frag2),activity_all_frag1=mean(activity_all_frag1),class=unique(class), activity_br1=mean(activity_br1),activity_br2=mean(activity_br2), activity_br3=mean(activity_br3), Basal_median=mean(Basal_median), activity_all=mean(activity_all))%>%
+  filter(log2(activity_all_frag2)!=(-Inf))%>%
+  filter(log2(activity_all_frag1)!=(-Inf))%>%
+  ungroup()
+```
+
+```{r Boosting_vs_promoter_activity, fig.width = 7, fig.height = 7}
+Averagedboost %>%
+  ggplot(aes(log2(activity_all_frag2), BoostPerPmed)) +
+  #scale_color_gradient2(low = 'navyblue', mid='gray95', high = 'orangered', name="Activity cE (log2)", guide= guide_colourbar(barwidth = 1, barheight = 10))+
+  geom_point(size=1, alpha=0.7)+
+  #geom_jitter( size=1, alpha=0.7, color="black",shape = 21, aes(fill=boost)) +
+  xlab('Basal Activity Promoter (log2)') +
+  ylab('Boost Index (log2)') +
+  #ggtitle("Basal Activity Promoter vs Boosting") +
+  theme_bw(base_size=15) + 
+  geom_hline(yintercept = 0)+
+  stat_cor(method = "pearson")+
+  geom_smooth(method = lm)+
+  labs(caption =  "cCRE-P (n=3325)") +
+  #stat_function(fun = (function(x)log2(2*2^(x))), colour = "black")+
+  #stat_function(fun = (function(x)log2(2^(x)/2)), colour = "black")+
+  coord_fixed(ratio = 1)
+  
+```
+
+# Boosting vs enhancer activity
+
+```{r Boosting_vs_cCREActivity, fig.width = 7, fig.height = 7, echo=FALSE}
+Averagedboost %>%
+  ggplot(aes(log2(activity_all_frag1), BoostPerPmed)) +
+  #scale_fill_gradient2(low = 'navyblue', mid='gray95', high = 'orangered', name="Boosting index", guide= guide_colourbar(barwidth = 1, barheight = 10))+
+  geom_point(size=1, alpha=0.7) +
+  #geom_jitter( size=1, alpha=0.7, color="black",shape = 21, aes(fill=boost)) +
+  xlab('Basal Activity cCRE (log2)') +
+  ylab('Boost Index (log2)') +
+  #ggtitle("Basal Activity candidate Enhancer vs Boosting") +
+  theme_bw(base_size=15) + 
+  geom_hline(yintercept = 0)+
+  stat_cor(method = "pearson")+
+  geom_smooth(method = lm)+
+  labs(caption =  "cCRE-P (n=3325)") +
+  #stat_function(fun = (function(x)log2(2*2^(x))), colour = "black")+
+  #stat_function(fun = (function(x)log2(2^(x)/2)), colour = "black")+
+  coord_fixed(ratio = 1)
+  
+
+```

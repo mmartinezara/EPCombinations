@@ -1,0 +1,579 @@
+---
+title: "EP-SuRE - DAT: Deconstruct A TAD - algorithm outline"
+author: "FC"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: journal #cerulean
+    highlight: monochrome
+    toc: true
+    toc_float: true
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+prefix.lab <- 'mesc_dat_deconstr_tad'
+knitr::opts_chunk$set(echo       = TRUE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      cache      = TRUE,
+                      cache.path = paste0('cache/', prefix.lab, '/'),
+                      fig.path   = paste0('figures/', prefix.lab, '/'),
+                      dev        = 'png', #set to pdf for LaTeX presentation figures
+                      fig.align  = 'center',
+                      fig.width  = 5,
+                      fig.height = 5)
+```
+
+```{r libs and fun, include = FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(here)
+library(gtools)
+
+library(GenomicFeatures)
+library(GenomicInteractions)
+library(BSgenome.Mmusculus.UCSC.mm10)
+
+# dat (Deconstruct A TAD) function
+# query: gene symbol
+# tib.lookup: tibble, Gencode id to gene symbol map
+# gr.tad: GRanges, TAD coordinates
+# gr.tss: GRanges, TSS coordinates
+# gr.dhs: GRanges, DHS coordinates
+# constrained: logical, if true the design is constrained to a smaller region (host TAD * 1.5 in size)
+# out.prefix: character, the file name prefix for exported files
+# export: logical, if true the design is exported to BED and FASTA files
+
+dat <- function(query, tib.lookup, gr.tad, gr.tss, gr.dhs, out.prefix, genome = Mmusculus, constrained = FALSE, export = FALSE) {
+  
+  # resize tss to [-375, 75] window
+  gr.tss <- promoters(gr.tss, upstream = 375, downstream = 75)
+
+  # map query to annotations --> GRanges
+  gr.query <- tib.lookup %>%
+  filter(gene_name == query) %>%
+  as('GRanges')
+
+  # locate TAD
+  host.tad <- subsetByOverlaps(gr.tad, gr.query)
+
+  # locate adjacent TADs
+  upstream.tad <- gr.tad.esc[ follow(host.tad, gr.tad) ] 
+  downstream.tad <- gr.tad.esc[ precede(host.tad, gr.tad) ]
+  
+  # join 3 TADs to create query region
+  three.tads <- c(upstream.tad, host.tad, downstream.tad)
+    
+  # define genomic region to be considered for deconstruction
+  if(constrained) {
+    # expand 1.5x from host TAD
+    region <- IRanges::resize(host.tad, round(1.5 * width(host.tad)), fix = 'center')
+  }
+  else {
+    region <- three.tads
+    end(region[1]) <- end(region[3])
+    region <- IRanges::reduce(region)
+  }
+  
+  message('Region of size ', signif(width(region) / 1e6, 3), ' Mb')
+  
+  # identify annotated promoters within region
+  tss.hits <- subsetByOverlaps(gr.tss, region)
+
+  # identify DHS within region
+  dhs.hits <- subsetByOverlaps(gr.dhs, region)
+
+  # merge DHS and promoters
+  hits <- c(tss.hits[, 0], dhs.hits)
+  hits <- IRanges::reduce(hits, ignore.strand = TRUE)
+
+  # resize to 450 bp
+  hits <- IRanges::resize(hits, 450, fix = 'center')
+  
+  # add element scores (for viz) + names
+  # set score (alpha=0.5 for E, alpha = 1 for P)
+  hits$score <- 500
+  hits$score[hits %over% tss.hits] <- 1e3
+
+  # set names
+  hits$name <- ''
+  idx.p <- which(hits$score == 1e3)
+  idx.e <- which(hits$score == 500)
+
+  hits$name[idx.p] <- paste0('P', 1 : length(idx.p), '_', query)
+  hits$name[idx.e] <- paste0('E', 1 : length(idx.e), '_', query)
+  
+  # compute GC content and add to hits
+  gc_cont <- getSeq(genome, hits) %>%
+    letterFrequency('GC') / 450 * 100
+  hits$gc <- as.vector(gc_cont)
+  
+  if(export) {
+    exportHits(query, hits, gr.tss, out.prefix) 
+  }
+  
+  return(list(query = gr.query, region = three.tads, elements = hits))
+}
+
+# function to export DAT elements to BED and fasta format 
+# (including fasta file with sense seq for building bt2 index)
+exportHits <- function(query, hits, gr_tss, out_prefix) {
+  
+  # set output file names
+  out_dir        <- '/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/designs/'
+  fn_bed         <- paste0(out_dir, out_prefix, '.bed')
+  fn_fasta       <- paste0(out_dir, out_prefix, '.fasta')
+  fn_sense_fasta <- paste0(out_dir, out_prefix, '_sense.fasta')
+  
+  # bed header
+  header <- paste0('track name=DAT_', query, ' ', 'description=DAT_', query, ' useScore=1')
+  btl    <- as(header, "BasicTrackLine") 
+
+  # export bed
+  rtracklayer::export.bed(hits, con = fn_bed, trackLine = btl)
+  
+  # export fasta
+  dss        <- getSeq(Mmusculus, hits)
+  names(dss) <- hits$name
+  writeXStringSet(x = dss, filepath = fn_fasta, format = 'fasta')
+  
+  # export sense fasta
+  # set + strand for all elements
+  strand(hits) <- '+'
+  
+  # get strand info for P
+  olaps                          <- findOverlaps(hits, gr_tss, ignore.strand = TRUE)
+  strand(hits)[queryHits(olaps)] <- strand(gr_tss)[subjectHits(olaps)]
+
+  # sanity check
+  n_p           <- length(grep('^P', hits$name))
+  n_p_retrieved <- length(unique(queryHits(olaps)))
+  message(n_p, ' P in the design')
+  message(n_p_retrieved, ' of which retrieved')
+  
+  # export fasta
+  dss        <- getSeq(Mmusculus, hits)
+  names(dss) <- hits$name
+  writeXStringSet(x = dss, filepath = fn_sense_fasta, format = 'fasta')
+}
+
+# function to format primer sets according to ordering template
+formatPrimersForOrdering <- function(fasta.fn, tsv.fn) {
+  tib <- readDNAStringSet(fasta.fn) %>%
+  as.data.frame %>%
+  as.tibble(rownames = 'Name') %>%
+  dplyr::rename(Sequence = x)
+  
+  # well ids --> version sort
+  well.ids <- outer(LETTERS[1:16], 1:24, function(x, y) paste(x, y, sep = '')) %>%
+    as.vector %>%
+    mixedsort
+  
+  tib <- tib %>%
+    mutate(WellPosition = well.ids[1 : nrow(tib)]) %>%
+    select(WellPosition, everything())
+  
+  write_tsv(tib, tsv.fn)
+}
+
+# same as above, but reordering (P follow E)
+format_primers_ordering_ep <- function(fasta.fn, tsv.fn) {
+  tib <- readDNAStringSet(fasta.fn) %>%
+  as.data.frame %>%
+  as.tibble(rownames = 'Name') %>%
+  dplyr::rename(Sequence = x)
+  
+  idx <- c(grep('^E', tib$Name), grep('^P', tib$Name))
+
+  tib <- tib %>%
+    dplyr::slice(idx)
+  
+  # well ids --> version sort
+  well.ids <- outer(LETTERS[1:16], 1:24, function(x, y) paste(x, y, sep = '')) %>%
+    as.vector %>%
+    mixedsort
+  
+  tib <- tib %>%
+    mutate(WellPosition = well.ids[1 : nrow(tib)]) %>%
+    dplyr::select(WellPosition, everything())
+  
+  write_tsv(tib, tsv.fn)
+}
+```
+
+```{r load annotations, include = FALSE}
+# gencode db
+gencode.db <- loadDb(file = '~/mydata/Annotations/mm10_gencode_v_m16.sqlite')
+
+# gencode tss (protein coding + lincRNAs)
+load(here('../data/tad_deconstr_design/fc180404_epsure_tadec_gencode_pcod_linc_tss.RData'))
+
+# gencode lookup tibble
+load(here('../data/tad_deconstr_design/fc180402_epsure_tadec_gencode_lookup_tibble_pcod_lnc.RData'))
+
+# tad coordinates
+load(here('../data/tad_deconstr_design/fc180319_epsure_tadec_tad_coord_mesc_bonev_et_al.RData'))
+
+# dhs coordinates
+load(here('../data/tad_deconstr_design/fc180410_epsure_tadec_dhs_coord_stringent.RData'))
+
+# combine 2i and serum DHS
+dhs.mesc <- IRanges::reduce(c(dhs.2i[,0], dhs.serum[,0]))
+```
+
+---
+
+## Aims
+
+We outline DAT (Deconstruct A TAD), a very simple algorithm that given a gene symbol identifies cis-regulatory elements within its TAD (and immediately adjacent ones) for primer design to be used in targeted TAD deconstruction experiments in mESCs.
+
+## Details
+
+Given a query gene symbol as an input, DAT performs the following steps:
+
+1. Map query gene symbol to genomic coordinates using a lookup tibble
+2. Identify query-containing TAD (TAD_i)
+3. Identify two TADs adjacent to query TAD
+4. Consider the genomic region (hereinafter query region) [TAD_(i-1) --- TAD_(i+1)]
+5. Identify annotated gene promoters within the query region
+6. Identify 2i and/or serum DHS within the query region
+7. Combine cis-regulatory elements, returning genomic coordinates to be targeted
+8. Annotate output, write fasta file and generate BED track
+9. Batch design primers (see below for more details)
+
+A second version re-centers the query region on the host TAD and considers a genomic region spanning 1.5x the host TAD size. This is currently not used, but could allow a (suboptimal) simplified design for complex regions.
+
+## Deconstructing selected TADs
+
+```{r run dat, eval = FALSE}
+dat.nanog <- dat(query = 'Nanog', 
+        tib.lookup = tib.gencode.lookup, 
+        gr.tad = gr.tad.esc, 
+        gr.tss = pcod.linc.tss,
+        gr.dhs = dhs.mesc, 
+        out.prefix = 'fc180419_dat_nanog', 
+        constrained = FALSE,
+        export = TRUE)
+
+dat.pou5f1 <- dat(query = 'Pou5f1', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_pou5f1', 
+       constrained = FALSE,
+       export = TRUE)
+
+dat.sox2 <- dat(query = 'Sox2', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_sox2', 
+       constrained = FALSE,
+       export = TRUE)
+
+dat.fgf5 <- dat(query = 'Fgf5', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_fgf5', 
+       constrained = FALSE,
+       export = TRUE)  
+
+dat.nodal <- dat(query = 'Nodal', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_nodal', 
+       constrained = FALSE,
+       export = TRUE)
+
+dat.klf2 <- dat(query = 'Klf2', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_klf2', 
+       constrained = FALSE,
+       export = TRUE)  
+
+dat.klf4 <- dat(query = 'Klf4', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_klf4', 
+       constrained = FALSE,
+       export = TRUE)  
+
+dat.lefty1 <- dat(query = 'Lefty1', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_lefty1', 
+       constrained = FALSE,
+       export = TRUE)  
+
+dat.esrrb <- dat(query = 'Esrrb', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_esrrb', 
+       constrained = FALSE,
+       export = TRUE)  
+
+dat.tbx3 <- dat(query = 'Tbx3', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_tbx3', 
+       constrained = FALSE,
+       export = TRUE)
+
+dat.tfcp2l1 <- dat(query = 'Tfcp2l1', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_tfcp2l1', 
+       constrained = FALSE,
+       export = TRUE)
+
+dat.foxa2 <- dat(query = 'Foxa2', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_foxa2', 
+       constrained = FALSE,
+       export = TRUE)
+
+dat.otx2 <- dat(query = 'Otx2', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_otx2', 
+       constrained = FALSE,
+       export = TRUE)
+
+dat.myc <- dat(query = 'Myc', 
+       tib.lookup = tib.gencode.lookup, 
+       gr.tad = gr.tad.esc, 
+       gr.tss = pcod.linc.tss, 
+       gr.dhs = dhs.mesc, 
+       out.prefix = 'fc180419_dat_myc', 
+       constrained = FALSE,
+       export = TRUE)
+```
+
+
+## Primer design
+
+Primer were designed in batch using a Python module for [Primer3](https://libnano.github.io/primer3-py/quickstart.html#primer-design). For more details on parameters, see the [Primer3 manual](http://primer3.sourceforge.net/primer3_manual.htm#PRIMER_WT_TM_GT). The parametrization used for the design can be found in  /home/f.comoglio/gitlab/gen-scripts/primer_design/batch_primer3_design.py
+
+```{sh design primers, eval = FALSE}
+cd /home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/primers
+
+python /home/f.comoglio/gitlab/gen-scripts/primer_design/batch_primer3_design.py ~/gitlab/epmatrix/data/tad_deconstr_design/designs/used_for_design_and_manually_curated/fc180419_dat_nanog.fasta /home/f.comoglio/mydata/Annotations/Genomes/mm10_gencode_v_m16/bt2_index/mm10_v_m16
+
+python /home/f.comoglio/gitlab/gen-scripts/primer_design/batch_primer3_design.py ~/gitlab/epmatrix/data/tad_deconstr_design/designs/used_for_design_and_manually_curated/fc180419_dat_klf2.fasta /home/f.comoglio/mydata/Annotations/Genomes/mm10_gencode_v_m16/bt2_index/mm10_v_m16
+
+python /home/f.comoglio/gitlab/gen-scripts/primer_design/batch_primer3_design.py ~/gitlab/epmatrix/data/tad_deconstr_design/designs/used_for_design_and_manually_curated/fc180419_dat_pou5f1.fasta /home/f.comoglio/mydata/Annotations/Genomes/mm10_gencode_v_m16/bt2_index/mm10_v_m16
+
+# python /home/f.comoglio/gitlab/gen-scripts/primer_design/batch_primer3_design.py ~/gitlab/epmatrix/data/tad_deconstr_design/designs/used_for_design_and_manually_curated/fc180419_dat_sox2.fasta /home/f.comoglio/mydata/Annotations/Genomes/mm10_gencode_v_m16/bt2_index/mm10_v_m16
+
+python /home/f.comoglio/gitlab/gen-scripts/primer_design/batch_primer3_design.py ~/gitlab/epmatrix/data/tad_deconstr_design/designs/used_for_design_and_manually_curated/fc180419_dat_tfcp2l1.fasta /home/f.comoglio/mydata/Annotations/Genomes/mm10_gencode_v_m16/bt2_index/mm10_v_m16
+
+```
+
+### Inspection and manual curation of designed primers
+
+```{r, identify missing fragments, eval = FALSE}
+find_missing <- function(sam_fn, n_e, n_p) {
+  
+  df <- read.delim(sam_fn, sep = '\t', header = FALSE)
+  ids <- df[, 1]
+  ids <- as.character(ids)
+  theor <- c(paste0('E', 1 : n_e), paste0('P', 1 : n_p))
+
+  setdiff(theor, ids)
+}
+
+find_missing('fc180419_dat_pou5f1_primer_aln_order.sam', n_e = 223, n_p = 93)
+find_missing('fc180419_dat_sox2_primer_aln_order.sam', n_e = 308, n_p = 29)
+find_missing('fc180419_dat_tfcp2l1_primer_aln_order.sam', n_e = 305, n_p = 33)
+```
+
+As expected, some elements within the selected regions could not be targeted. We inspected each design in details (see below).
+
+For the Nanog design:
+
+* P11-12 missing, but E96 closely located and promoter-like
+* P13 missing, but E100-101 closely located and promoter-like
+* P15 not designable (repeats) even after shifting region downstream
+
+For the Klf2 design:
+
+* P6 missing, but inactive olfactory receptor gene within OLF cluster
+* P15-16 missing, P15 overlaps LTR, P20 overlaps simple repeats and is a CGI
+* E52 not designable (simple repeat at 3' end), was shifted 150 bp upstream and the sequence was manually added to the fasta file
+* E54 and E59 missing
+* P16 (Klf2 promoter) will be tested separately, in addition
+
+For the Pou5f1 design:
+
+* E1, E2 within boundary region (not designable, excluded)
+* P5 overlaps ERV - excluded (no shift possible)
+* P15 is alternative TSS of P14 (P14 present) (not designable, excluded)
+* P18 (chr17:35089010-35089459) overlaps SINE (chr17:35088892-35089078). Shift by 70nt
+* P21 (chr17:35121080-35121529) overlaps SR (chr17:35121127-35121159). Shift by 80 nt
+* E28 within dense SR (not designable, excluded)
+* P27 is repetitive (but not annotated as such) (not designable, excluded)
+* P24 (chr17:35125998-35126447) overlaps SINE (chr17:35126000-35126131). Shift by 140 nt
+* P30 (chr17:35194064-35194513) overlaps 2 x SR (chr17:35194084-35194128). Shift by 70 nt
+* E47 is repetitive (but not annotated as such) (not designable, excluded)
+* P38 is (used) alternative TSS of P37, but overlaps ERV (not designable, excluded)
+* E55 flanked by repetitive elements (not designable, excluded)
+* E57 is repetitive (but not annotated as such) (not designable, excluded)
+* E60-64, E67-71 and P42-P44 span H2 IHC locus, overlap different classes of repeats, are no/low expressed (not designable, excluded)
+* P100 partially overlaps P99, and overlaps ERV (not designable, excluded)
+* P102 overlaps SINE/ERV (not designable, excluded)
+* E105 is an insulator and overlaps SINE (not designable, excluded)
+* E109/E110 overlap LTR/SR (not designable, excluded)
+* E121 is repetitive (but not annotated as such) (not designable, excluded)
+* E129 overlaps Charlie transposon (not designable, excluded)
+* P61 looks fine, but not designable. Shift by -100 nt
+* E156 overlaps SR (not designable, excluded)
+* E157 and P66 are actually two promoters. E157 is repetitive (but not annotated as such) (not designable, excluded), while P66 (chr17:35897395-35897844) overlaps SR (chr17:35897687-35897711). Shift by -160 nt (this will align it to DHS).
+* E162 overlaps SINE/ERV (not designable, excluded)
+* P71 is repetitive (but not annotated as such) (not designable, excluded)
+* E173-174, E176-177 and P78 span H2 IHC locus, overlap different classes of repeats, are no/low expressed (not designable, excluded)
+* E189 looks fine (not designable, excluded)
+* P80 and E192 seem low Tm (not designable, excluded)
+* E197 overlaps SR (not designable, excluded)
+* E208 is an insulator, E209-E211 overlap repeats and are high GC (not designable, excluded)
+
+For the Sox2 design:
+
+* P19 (chr3:34649971-34650420) is the promoter of Sox2. It is not designable as such, also not centered on the DHS (summit: 34649914). Upstream SR (chr3:34649849-34649878). Shift by -200 not viable; shift by -90 not viable
+
+For the Tcfp2l1 design:
+
+* P1, P2, P4-5 are lincRNA promoters/non-annotated gene, no DHS, not expressed, not designable (not designable, excluded)
+* E1 - E11 are contained in the locus above (not designable, excluded)
+* E37 overlaps ERV (not designable, excluded)
+* E40 is an insulator (partly repetitive) (not designable, excluded)
+* E56 and E57 partially overlap. E56 overlaps SINE (not designable, excluded)
+* E70 overlaps SINE (not designable, excluded)
+* E81 seems fine (but not designable, excluded)
+* E112, E114 overlap SINE (not designable, excluded)
+* E136 seems fine (but not designable, excluded)
+* E163 overlaps ERV (not designable, excluded)
+* E169 is repetitive (but not annotated as such) (excluded)
+* E171 overlaps SINE (not designable, excluded)
+* E182 is repetitive (but not annotated as such) (excluded)
+* E218 overlaps SR/flanked by SR (not designable, excluded)
+* E229 is repetitive (but not annotated as such) (excluded)
+* E233 overlaps ERV (not designable, excluded)
+* E236 overlaps SR and is repetitive (but not annotated as such) (excluded)
+* E239 overlaps ERV (not designable, excluded)
+* E248, E258 overlaps SINE, SR and ERV (not designable, excluded)
+* E276 overlaps multiple SINEs (not designable, excluded)
+
+```{r manual curation, eval = FALSE}
+tmp <- shift(dat.klf2$elements[dat.klf2$elements$name == 'E52_Klf2'], -150)
+getSeq(Mmusculus, tmp) %>% as.character()
+
+get_new_seq <- function(gr, id, shift_by) {
+  
+  hit     <- gr$elements[gr$elements$name == id]
+  shifted <- shift(hit, shift_by)
+  
+  getSeq(Mmusculus, shifted) %>% 
+    as.character()
+}
+
+get_new_seq(dat.pou5f1, 'P18_Pou5f1', 70)
+get_new_seq(dat.pou5f1, 'P21_Pou5f1', 80)
+get_new_seq(dat.pou5f1, 'P24_Pou5f1', 140)
+get_new_seq(dat.pou5f1, 'P30_Pou5f1', 70)
+get_new_seq(dat.pou5f1, 'P61_Pou5f1', -100)
+get_new_seq(dat.pou5f1, 'P66_Pou5f1', -160)
+```
+
+```{sh design primers after manual curation, eval = FALSE}
+python /home/f.comoglio/gitlab/gen-scripts/primer_design/batch_primer3_design.py ~/gitlab/epmatrix/data/tad_deconstr_design/designs/used_for_design_and_manually_curated/fc180419_dat_pou5f1_man_cur.fasta /home/f.comoglio/mydata/Annotations/Genomes/mm10_gencode_v_m16/bt2_index/mm10_v_m16
+```
+
+### Formatting for ordering
+
+Primers were ordered in a 386 well plate format. Fasta files were used to generate an Excel order sheet. One empty row was used to separate Klf and Nanog designs (added manually to the order sheet).
+
+```{sh concatenate primer seq, eval=FALSE}
+dirn=/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/primers/ordered
+
+cat $dirn/fc180419_dat_klf2_order_rev.fasta $dirn/fc180419_dat_nanog_order_rev.fasta > $dirn/fc180419_dat_nanog_klf_combined_rev.fasta
+cat $dirn/fc180419_dat_klf2_order_fwd.fasta $dirn/fc180419_dat_nanog_order_fwd.fasta > $dirn/fc180419_dat_nanog_klf_combined_fwd.fasta
+```
+
+```{r format for ordering nanog klf, eval = FALSE}
+formatPrimersForOrdering(here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_nanog_klf_combined_fwd.fasta'),
+                         here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_nanog_klf_combined_fwd.tsv'))
+formatPrimersForOrdering(here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_nanog_klf_combined_rev.fasta'),
+                         here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_nanog_klf_combined_rev.tsv'))
+```
+
+For Pou5f1 and Tcfp2l1, one plate / library was used. Enhancers and promoters were separated, with the latter at the bottom.
+
+```{r format for ordering pou5f1 and tfcp2l1}
+format_primers_ordering_ep(here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_pou5f1_man_cur_order_fwd.fasta'),
+                           here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_pou5f1_man_cur_order_fwd.tsv'))
+format_primers_ordering_ep(here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_pou5f1_man_cur_order_rev.fasta'),
+                           here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_pou5f1_man_cur_order_rev.tsv'))
+
+format_primers_ordering_ep(here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_tfcp2l1_order_fwd.fasta'),
+                           here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_tfcp2l1_order_fwd.tsv'))
+format_primers_ordering_ep(here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_tfcp2l1_order_rev.fasta'),
+                           here('../data/tad_deconstr_design/primers/ordered/fc180419_dat_tfcp2l1_order_rev.tsv'))
+
+```
+
+
+### GC content of target fragments
+
+```{r gc content, echo = FALSE, fig.width = 7}
+tib <- tibble(gc = c(dat.klf2$elements$gc, dat.nanog$elements$gc))
+tib[['id']] <- c(rep('Klf2', length(dat.klf2$elements)), rep('Nanog', length(dat.nanog$elements)))
+
+tib %>%
+  ggplot(aes(x = gc)) +
+    geom_histogram() +
+    facet_wrap(~id) +
+    labs(x = 'GC content') +
+    theme_bw()
+```
+
+## v4C profiles
+
+Virtual 4C (v4C) profiles at query promoters using
+
+```{bash, eval = FALSE}
+~/gitlab/gen-scripts/v4c/virtual4C.sh
+```
+
+## SessionInfo
+
+```{r}
+sessionInfo()
+```

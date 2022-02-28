@@ -1,0 +1,930 @@
+---
+title: "MMA20200925_NCS_SplitPipV2_Check"
+author: "MMA"
+date: "25/9/2020"
+output: html_document
+---
+
+```{r knitr setup, include=FALSE}
+prefix_lab <- 'Split_klf2_NCS_iPCR_ecn_dattero_V2'
+knitr::opts_chunk$set(echo = TRUE,
+                      include = TRUE,
+                      message = FALSE, 
+                      warning = FALSE, 
+                      cache = TRUE, 
+                      cache.path = paste0('cache/', prefix_lab, '/'),
+                      fig.path   = paste0('figures/', prefix_lab, '/'),
+                      fig.align = 'center', 
+                      fig.width = 5, 
+                      fig.height = 5,
+                      knitr.table.format = 'markdown')
+```
+
+```{r libs and fun, include = FALSE, tidy = FALSE}
+library(tidyverse)
+library(here)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(gridExtra)
+library(pander)
+library(cowplot)
+library(circlize)
+library(datteRo)
+library(ggplot2)
+library(GGally)
+library(scales)
+library(heatmaply)
+```
+
+---
+
+# Intro 
+
+## Aim 
+Check whether Split pipeline V2 has an impact in the barcode activity variability. 
+This version of the pipeline adds barcodes assigned to unknown fragments. the barcode clashing removal is removed from the pipeline. Now we implement the barcode clashing removal within and across libraries in this document. We find which barcode clusters can be assigned to multiple fragments, in order to remove them from the data.
+
+Merge normalise and process iPCR data from NCS (E74) and Split (E62) design libraries with ecn data from E87.
+
+## Merging ecn - iPCR data
+ecn data for the P-E-SuRE (Split Design) libraries were analyzed using the ```ecn.wf``` workflow of the EP-SuRE Snakemake pipeline (see GitLab).
+
+ipcr data the P-E-SuRE (Split Design) libraries were analyzed using the ```ipcr.wf``` workflow of the EP-SuRE Snakemake pipeline V2 (see GitLab).
+
+```{sh, eval = FALSE}
+#ecn 
+snakemake --cores 24 --use-conda --snakefile ~/mydata/GitLab/epmatrix/epsure_pipeline/Split/workflows/ecn.wf --configfile ~/mydata/GitLab/epmatrix/epsure_pipeline/Split/config/MMA20200811_Split_ecn.yaml
+#iPCR workflow 2.0 Split libs
+snakemake --cores 24 --use-conda --snakefile ~/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/workflows/ipcr.wf --configfile ~/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/runs/MMA20200925_Split_E62_ipcr.yaml
+
+#iPCR workflow 2.0 Split libs
+snakemake --cores 24 --use-conda --snakefile ~/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/workflows/ipcr.wf --configfile ~/mydata/GitLab/epmatrix/epsure_pipeline/SplitV2/runs/MMA20200923_NCS_config_ipcr.yaml
+```
+
+iPCR and ECN (expression and copy number) data for each library are then integrated as follows:
+
+1. Merge iPCR and ECN data, retaining iPCR+cDNA complete cases, i.e. all barcodes with known fragment identity and copy number > 0, irrespective of expression. Missing values - i.e. NA expression values - are replaced with 0 (not expressed). Note: ECN data are attributed to either library solely based on barcodes (samples were pooled prior to sequencing).
+2. Compute barcode-level summary statistics
+
+Boosting measures are then computed as follows:
+
+1. Summarize (i.e. sum) pDNA counts for each barcode across replicates
+2. Remove barcodes with pDNA reads < 8
+3. Remove barcodes of elements with < 5 distinct barcodes
+4. Offset-normalize (to library sizes)
+5. Compute activities and summarize barcodes using a weighted average with weights proportional to normalized pDNA counts
+6. Model combinatorial activity distributions to define active pairs
+7. Compute cooperativity. Details on the computation of cooperativity indices can be found in the PDF document ```smb://res-storage.nki.nl/GroupSteensel/f.comoglio/Projects/EP_matrix/pub/fc180211_epsure_notation_def_cooperativity_v1.pdf```. The geometric mean of the activities across replicates is used to compute cooperativity indices
+8. Add metadata and export annotated data tables as tibbles
+
+In addition, a 'boost' index is computed by normalizing the activity a pair to the basal activity of its second element only (i.e. $\log_2(a_{ij}/a_j)$).
+
+Finally, the reproducibility/correlation of activity values is evaluated across replicates.
+
+## Correspondence between sample names and promoters
+| Plasmid | Library Name | Promoter | iPCR Data name |
+| :-----: |:------------:|:--------:|:--------------:|
+| pMMA002 | P-E001 | No P | Split1 |
+| pMMA003 | P-E002 | P1 | Split2 |
+| pMMA005 | P-E003 | P9 | Split3 |
+| pMMA006 | P-E004 | P13 | Split4 |
+| pMMA007 | P-E005 | P14 | Split5 |
+| pMMA008 | P-E006 | P16 | Split6 |
+| pMMA009 | P-E007 | P17 | Split7 |
+| pMMA010 | P-E008 | P18 | Split8 |
+| pMMA011 | P-E009 | P19 | Split9 |
+| pMMA012 | P-E010 | P21 | Split10 |
+| pMMA013 | P-E011 | P22 | Split11 |
+| pMMA002 | P-E001 | No P | NCS001 |
+| pMMA003 | P-E002 | P1 | NCS002 |
+| pMMA005 | P-E003 | P9 | NCS003 |
+| pMMA006 | P-E004 | P13 | NCS004 |
+| pMMA007 | P-E005 | P14 | NCS005 |
+| pMMA008 | P-E006 | P16 | NCS006 |
+| pMMA009 | P-E007 | P17 | NCS007 |
+| pMMA010 | P-E008 | P18 | NCS008 |
+| pMMA011 | P-E009 | P19 | NCS009 |
+| pMMA012 | P-E010 | P21 | NCS010 |
+| pMMA013 | P-E011 | P22 | NCS011 |
+
+# Data processing
+## iPCR - Processing
+
+### Split libraries
+
+```{r process libs}
+#We suspect Split libraries 7 and 9 have been missidentified in the demultiplexing, therefore, Until confirmation I swap them
+# load libraries
+tib_Split1_NoP <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_1_P-E001_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split2_P1 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_2_P-E002_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split3_P9 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_3_P-E003_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split4_P13 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_4_P-E004_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split5_P14 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_5_P-E005_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split6_P16 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_6_P-E006_Split_unique_barcodes_frag_id_merged.tsv'))
+#Note Back to expected, corrected at demultiplexing level 
+tib_Split7_P17 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_7_P-E007_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split8_P18 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_8_P-E008_Split_unique_barcodes_frag_id_merged.tsv'))
+#Note Back to expected, corrected at demultiplexing level
+tib_Split9_P19 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_9_P-E009_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split10_P21 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_10_P-E010_Split_unique_barcodes_frag_id_merged.tsv'))
+tib_Split11_P22 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr/ResultsV2/ipcr_E62_11_P-E011_Split_unique_barcodes_frag_id_merged.tsv'))
+
+```
+
+
+#### Split1
+```{r}
+# remove heterotypic
+tib_Split1_NoP <- remove_heterotypic(tib_Split1_NoP)
+
+# fragment representation
+count_fragments(tib_Split1_NoP)
+count_elements(tib_Split1_NoP)
+count_bc_reads(tib_Split1_NoP)
+```
+
+```{r plot barcode count distribution 1, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split1_NoP, type = 'basal')
+```
+
+#### Split2
+```{r}
+# remove heterotypic
+tib_Split2_P1 <- remove_heterotypic(tib_Split2_P1)
+
+# fragment representation
+count_fragments(tib_Split2_P1)
+count_elements(tib_Split2_P1)
+count_bc_reads(tib_Split2_P1)
+```
+
+```{r plot barcode count distribution 2, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split2_P1, type = 'basal')
+```
+
+#### Split3
+```{r}
+# remove heterotypic
+tib_Split3_P9 <- remove_heterotypic(tib_Split3_P9)
+
+# fragment representation
+count_fragments(tib_Split3_P9)
+count_elements(tib_Split3_P9)
+count_bc_reads(tib_Split3_P9)
+```
+
+```{r plot barcode count distribution 3, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split3_P9, type = 'basal')
+```
+
+#### Split4
+```{r}
+# remove heterotypic
+tib_Split4_P13 <- remove_heterotypic(tib_Split4_P13)
+
+# fragment representation
+count_fragments(tib_Split4_P13)
+count_elements(tib_Split4_P13)
+count_bc_reads(tib_Split4_P13)
+```
+
+```{r plot barcode count distribution 4, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split4_P13, type = 'basal')
+```
+
+#### Split5
+```{r}
+# remove heterotypic
+tib_Split5_P14 <- remove_heterotypic(tib_Split5_P14)
+
+# fragment representation
+count_fragments(tib_Split5_P14)
+count_elements(tib_Split5_P14)
+count_bc_reads(tib_Split5_P14)
+```
+
+```{r plot barcode count distribution 5, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split5_P14, type = 'basal')
+```
+
+#### Split6
+```{r}
+# remove heterotypic
+tib_Split6_P16 <- remove_heterotypic(tib_Split6_P16)
+
+# fragment representation
+count_fragments(tib_Split6_P16)
+count_elements(tib_Split6_P16)
+count_bc_reads(tib_Split6_P16)
+```
+
+```{r plot barcode count distribution 6, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split6_P16, type = 'basal')
+```
+
+#### Split7
+```{r}
+# remove heterotypic
+tib_Split7_P17 <- remove_heterotypic(tib_Split7_P17)
+
+# fragment representation
+count_fragments(tib_Split7_P17)
+count_elements(tib_Split7_P17)
+count_bc_reads(tib_Split7_P17)
+```
+
+```{r plot barcode count distribution 7, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split7_P17, type = 'basal')
+```
+
+#### Split8
+```{r}
+# remove heterotypic
+tib_Split8_P18 <- remove_heterotypic(tib_Split8_P18)
+
+# fragment representation
+count_fragments(tib_Split8_P18)
+count_elements(tib_Split8_P18)
+count_bc_reads(tib_Split8_P18)
+```
+
+```{r plot barcode count distribution 8, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split8_P18, type = 'basal')
+```
+
+#### Split9
+```{r}
+# remove heterotypic
+tib_Split9_P19 <- remove_heterotypic(tib_Split9_P19)
+
+# fragment representation
+count_fragments(tib_Split9_P19)
+count_elements(tib_Split9_P19)
+count_bc_reads(tib_Split9_P19)
+```
+
+```{r plot barcode count distribution 9, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split9_P19, type = 'basal')
+```
+
+#### Split10
+```{r}
+# remove heterotypic
+tib_Split10_P21 <- remove_heterotypic(tib_Split10_P21)
+
+# fragment representation
+count_fragments(tib_Split10_P21)
+count_elements(tib_Split10_P21)
+count_bc_reads(tib_Split10_P21)
+```
+
+```{r plot barcode count distribution 10, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split10_P21, type = 'basal')
+```
+
+#### Split11
+```{r}
+# remove heterotypic
+tib_Split11_P22 <- remove_heterotypic(tib_Split11_P22)
+
+# fragment representation
+count_fragments(tib_Split11_P22)
+count_elements(tib_Split11_P22)
+count_bc_reads(tib_Split11_P22)
+```
+
+```{r plot barcode count distribution 11, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_Split11_P22, type = 'basal')
+```
+
+### NCS libraries
+
+```{r process libs}
+# load libraries
+tib_NCS001_NoP <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS001_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS002_P1 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS002_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS003_P9 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS003_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS004_P13 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS004_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS005_P14 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS005_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS006_P16 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS006_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS007_P17 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS007_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS008_P18 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS008_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS009_P19 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS009_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS010_P21 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS010_iPCR_unique_barcodes_frag_id_merged.tsv'))
+tib_NCS011_P22 <- as.tibble(read_ipcr('~/epmatrix/mouse/Split/ipcr_NCS/Results_V2/E74_NCS011_iPCR_unique_barcodes_frag_id_merged.tsv'))
+
+```
+
+#### NCS001
+```{r}
+# remove heterotypic
+tib_NCS001_NoP <- remove_heterotypic(tib_NCS001_NoP)
+
+# fragment representation
+count_fragments(tib_NCS001_NoP )
+count_elements(tib_NCS001_NoP )
+count_bc_reads(tib_NCS001_NoP )
+```
+
+```{r plot barcode count distribution 1, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS001_NoP , type = 'basal')
+```
+
+#### NCS002
+```{r}
+# remove heterotypic
+tib_NCS002_P1 <- remove_heterotypic(tib_NCS002_P1)
+
+# fragment representation
+count_fragments(tib_NCS002_P1 )
+count_elements(tib_NCS002_P1 )
+count_bc_reads(tib_NCS002_P1 )
+```
+
+```{r plot barcode count distribution 2, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS002_P1 , type = 'basal')
+```
+
+#### NCS003
+```{r}
+# remove heterotypic
+tib_NCS003_P9 <- remove_heterotypic(tib_NCS003_P9)
+
+# fragment representation
+count_fragments(tib_NCS003_P9 )
+count_elements(tib_NCS003_P9 )
+count_bc_reads(tib_NCS003_P9 )
+```
+
+```{r plot barcode count distribution 3, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS003_P9 , type = 'basal')
+```
+
+#### NCS004
+```{r}
+# remove heterotypic
+tib_NCS004_P13 <- remove_heterotypic(tib_NCS004_P13)
+
+# fragment representation
+count_fragments(tib_NCS004_P13 )
+count_elements(tib_NCS004_P13 )
+count_bc_reads(tib_NCS004_P13 )
+```
+
+```{r plot barcode count distribution 4, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS004_P13 , type = 'basal')
+```
+
+#### NCS005
+```{r}
+# remove heterotypic
+tib_NCS005_P14 <- remove_heterotypic(tib_NCS005_P14)
+
+# fragment representation
+count_fragments(tib_NCS005_P14 )
+count_elements(tib_NCS005_P14 )
+count_bc_reads(tib_NCS005_P14 )
+```
+
+```{r plot barcode count distribution 5, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS005_P14 , type = 'basal')
+```
+
+#### NCS006
+```{r}
+# remove heterotypic
+tib_NCS006_P16 <- remove_heterotypic(tib_NCS006_P16)
+
+# fragment representation
+count_fragments(tib_NCS006_P16 )
+count_elements(tib_NCS006_P16 )
+count_bc_reads(tib_NCS006_P16 )
+```
+
+```{r plot barcode count distribution 6, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS006_P16 , type = 'basal')
+```
+
+#### NCS007
+```{r}
+# remove heterotypic
+tib_NCS007_P17 <- remove_heterotypic(tib_NCS007_P17)
+
+# fragment representation
+count_fragments(tib_NCS007_P17 )
+count_elements(tib_NCS007_P17 )
+count_bc_reads(tib_NCS007_P17 )
+```
+
+```{r plot barcode count distribution 7, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS007_P17 , type = 'basal')
+```
+
+#### NCS008
+```{r}
+# remove heterotypic
+tib_NCS008_P18 <- remove_heterotypic(tib_NCS008_P18)
+
+# fragment representation
+count_fragments(tib_NCS008_P18 )
+count_elements(tib_NCS008_P18 )
+count_bc_reads(tib_NCS008_P18 )
+```
+
+```{r plot barcode count distribution 8, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS008_P18 , type = 'basal')
+```
+
+#### NCS009
+```{r}
+# remove heterotypic
+tib_NCS009_P19 <- remove_heterotypic(tib_NCS009_P19)
+
+# fragment representation
+count_fragments(tib_NCS009_P19 )
+count_elements(tib_NCS009_P19 )
+count_bc_reads(tib_NCS009_P19 )
+```
+
+```{r plot barcode count distribution 9, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS009_P19 , type = 'basal')
+```
+
+#### NCS010
+```{r}
+# remove heterotypic
+tib_NCS010_P21 <- remove_heterotypic(tib_NCS010_P21)
+
+# fragment representation
+count_fragments(tib_NCS010_P21 )
+count_elements(tib_NCS010_P21 )
+count_bc_reads(tib_NCS010_P21 )
+```
+
+```{r plot barcode count distribution 10, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS010_P21 , type = 'basal')
+```
+
+#### NCS011
+```{r}
+# remove heterotypic
+tib_NCS011_P22 <- remove_heterotypic(tib_NCS011_P22)
+
+# fragment representation
+count_fragments(tib_NCS011_P22 )
+count_elements(tib_NCS011_P22 )
+count_bc_reads(tib_NCS011_P22 )
+```
+
+```{r plot barcode count distribution 11, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_NCS011_P22 , type = 'basal')
+```
+
+### Combine Split libraries
+
+In order to make comparisons easier between the Datasets here processed and the Klf2 library from the Direct ligation approach (EP-SuRE) we have to make a single table containing all the combinations and that has the same structure as the ones we want to make the comparison to. for this purpose, we will keep the terminology fragment 1 and fragment 2, being in this case fragment 2 the promoter cloned in promoter position, and fragment 1 the element in downstream enhancer position. This way fragment 1 and 2 in each design have analogous functions although different positions. Therefore, for each library we rename fragment 2 to the cloned promoter, and the id to fragment 1 + renamed fragment 2. for easier identification we add a column indicating the library name. In this process we also correct "eempty" fragments to "empty", and prefix "e" for noF
+
+After this renaming step we have to combine all the 22 libraries into one data table and filter out barcodes shared between libraries.
+
+#### Split libs 
+
+```{r}
+#split1
+tib_Split1_NoP_renamed <- tib_Split1_NoP  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="NoP") %>% mutate(strand2="*") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split1")
+
+#split2
+tib_Split2_P1_renamed <- tib_Split2_P1  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P001") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split2")
+
+#split3
+tib_Split3_P9_renamed <- tib_Split3_P9  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P009") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split3")
+
+#split4
+tib_Split4_P13_renamed <- tib_Split4_P13  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P013") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split4")
+
+#split5
+tib_Split5_P14_renamed <- tib_Split5_P14  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P014") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split5")
+
+#split6
+tib_Split6_P16_renamed <- tib_Split6_P16  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P016") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split6")
+
+#split7
+tib_Split7_P17_renamed <- tib_Split7_P17 %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P017") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split7")
+
+#split8
+tib_Split8_P18_renamed <- tib_Split8_P18 %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P018") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split8")
+
+#split9
+tib_Split9_P19_renamed <- tib_Split9_P19 %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P019") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split9")
+
+#split10
+tib_Split10_P21_renamed <- tib_Split10_P21 %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P021") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split10")
+
+#split11
+tib_Split11_P22_renamed <- tib_Split11_P22 %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", prefix1)) %>% mutate(frag2="P022") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="Split11")
+```
+
+#### NCS libs
+```{r}
+#NCS001
+tib_NCS001_NoP_renamed <- tib_NCS001_NoP  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="NoP") %>% mutate(strand2="*") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS001")
+
+#NCS002
+tib_NCS002_P1_renamed <- tib_NCS002_P1  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P001") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS002")
+
+#NCS003
+tib_NCS003_P9_renamed <- tib_NCS003_P9  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P009") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS003")
+
+#NCS004
+tib_NCS004_P13_renamed <- tib_NCS004_P13  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P013") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS004")
+
+#NCS005
+tib_NCS005_P14_renamed <- tib_NCS005_P14  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P014") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS005")
+
+#NCS006
+tib_NCS006_P16_renamed <- tib_NCS006_P16  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P016") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS006")
+
+#NCS007
+tib_NCS007_P17_renamed <- tib_NCS007_P17  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P017") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS007")
+
+#NCS008
+tib_NCS008_P18_renamed <- tib_NCS008_P18  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P018") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS008")
+
+#NCS009
+tib_NCS009_P19_renamed <- tib_NCS009_P19  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P019") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS009")
+
+#NCS010
+tib_NCS010_P21_renamed <- tib_NCS010_P21  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P021") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS010")
+
+#NCS011
+tib_NCS011_P22_renamed <- tib_NCS011_P22  %>% mutate(frag1 = ifelse(frag1=="eempty", "empty", frag1)) %>% mutate(prefix1 = ifelse(prefix1=="e", "NoF", ifelse(prefix1=="E", "S",prefix1))) %>% mutate(frag2="P022") %>% mutate(strand2="+") %>% mutate(prefix2="P") %>% mutate(id =paste0(frag1, strand1, frag2, strand2)) %>% mutate(library="NCS011")
+```
+
+### Combine all libs
+
+```{r}
+#Combine
+tib_Split_NCS_Combined_V2 <- bind_rows(tib_Split1_NoP_renamed, tib_Split2_P1_renamed, tib_Split3_P9_renamed, tib_Split4_P13_renamed, tib_Split5_P14_renamed, tib_Split6_P16_renamed, tib_Split7_P17_renamed, tib_Split8_P18_renamed, tib_Split9_P19_renamed, tib_Split10_P21_renamed, tib_Split11_P22_renamed, tib_NCS001_NoP_renamed, tib_NCS002_P1_renamed, tib_NCS003_P9_renamed, tib_NCS004_P13_renamed, tib_NCS005_P14_renamed, tib_NCS006_P16_renamed, tib_NCS007_P17_renamed, tib_NCS008_P18_renamed, tib_NCS009_P19_renamed, tib_NCS010_P21_renamed, tib_NCS011_P22_renamed)
+
+#Filter Barcode Clashing, old, distinct does not work as I thought
+#tib_Split_NCS_Combined_Unique_V2 <- distinct(tib_Split_NCS_Combined_V2, barcode, .keep_all = TRUE) %>% filter(frag1!="uunknown")
+
+## This is the new key step in removing barcode clashing within and across libraries
+# circumvent distinct function, this manual version removes all non unique rows
+tib_Split_NCS_Combined_Unique_V2<-tib_Split_NCS_Combined_V2 %>%nest(-barcode ) %>% mutate(n = map_dbl(data, nrow))%>%
+  filter(n==1)%>%
+  unnest()%>% 
+  select(-n)%>% 
+  filter(frag1!="uunknown")
+
+
+#tib_Split_NCS_Combined_Unique_PlusUnknw_V2 <- distinct(tib_Split_NCS_Combined_V2, barcode, .keep_all = TRUE)
+
+tib_Split_NCS_Combined_Unique_PlusUnknw_V2 <-tib_Split_NCS_Combined_V2 %>%nest(-barcode ) %>% mutate(n = map_dbl(data, nrow))%>%
+  filter(n==1)%>%
+  unnest()%>% 
+  select(-n)
+```
+
+### Exploratory iPCR plots
+#### iPCR counts per library
+```{r, fig.width = 20, fig.height = 18}
+ggplot(tib_Split_NCS_Combined_Unique_V2, aes(ipcr_counts)) +
+  geom_histogram(binwidth = 1)+
+  facet_wrap(~library)+
+  ggtitle("iPCR counts Combined")+
+  xlab("Read counts")+
+  ylab("Nr of barcodes")+
+  scale_y_continuous(limits = c(0, 10000))+
+  scale_x_continuous(limits = c(0, 40))
+
+
+```
+
+#### NR of BC per library and per element.
+
+```{r}
+tib_Split_NCS_Combined_Unique_V2 %>% group_by(frag2) %>%   summarise(BC = n(), combinations = n_distinct(id) ) %>% kable()
+
+tib_Split_NCS_Combined_Unique_V2 %>% group_by(frag2) %>% distinct(id) %>%  summarise(BC = n(), combinations = n_distinct(id) ) %>% kable()
+```
+
+
+```{r, fig.width = 20, fig.height = 18}
+tib_Split_NCS_Combined_Unique_V2%>%
+  group_by(id, library)%>%
+  summarise(BC = n())%>%
+ggplot(aes(log2(BC))) +
+  geom_histogram(binwidth = 0.5)+
+  facet_wrap(~library)+
+  ggtitle("Barcode Nr distriburions")+
+  xlab("Nr of Barcodes(log2)")+
+  ylab("Nr of Combinations")
+
+
+```
+
+#### Plot combinations per promoter
+```{r, fig.width = 10, fig.height = 9}
+tib_Split_NCS_Combined_Unique_V2 %>%
+  group_by(frag2) %>%
+  distinct(id, .keep_all = TRUE)%>%
+  summarise(combinations = n())%>%
+  ggplot(aes(frag2, combinations, fill=frag2))+
+  geom_bar(stat = "identity")+
+  coord_cartesian(ylim = c(0, 320)) +
+  labs(title = "Split Design Combinations per Promoter" ,caption="total combinations = ?")
+
+```
+
+#### Plot Nr of barcodes for empty combinations
+
+```{r, fig.width = 10, fig.height = 9}
+tib_Split_NCS_Combined_Unique_V2 %>%
+  mutate(Set=ifelse(str_sub(library,1,1)=="N", "NCS", "Split"))%>%
+  filter(prefix1=="NoF") %>%
+  group_by(frag2, Set) %>%
+  summarise(NrBC = n())%>%
+  ggplot(aes(frag2, NrBC, fill=frag2))+
+  geom_bar(stat = "identity")+
+  facet_wrap(~Set)+
+  labs(title = "Split Design Nr of barcodes per Empty query + Promoter")
+
+```
+
+# ecn data merging
+## Combining expression and copy number data
+
+Note: in E87 we sequenced 3 cDNA Biological replicates, and 2 replicates for the pDNA (copy number data).
+
+```{r merge ipcr and ecn data}
+# read expression data (cdna)
+tib_expr_br1 <- read_ecn('/DATA/projects/epmatrix/mouse/Split/ecn_NCS/Results/E87_NCS_cDNA_BR1_barcode_counts.tsv', col_lab = 'cdna_counts_br1')
+tib_expr_br2 <- read_ecn('/DATA/projects/epmatrix/mouse/Split/ecn_NCS/Results/E87_NCS_cDNA_BR2_barcode_counts.tsv', col_lab = 'cdna_counts_br2')
+tib_expr_br3 <- read_ecn('/DATA/projects/epmatrix/mouse/Split/ecn_NCS/Results/E87_NCS_cDNA_BR3_barcode_counts.tsv', col_lab = 'cdna_counts_br3')
+
+# read copy number data (pdna)
+tib_cn_br1 <- read_ecn('/DATA/projects/epmatrix/mouse/Split/ecn_NCS/Results/E87_NCS_pDNA_BR1_barcode_counts.tsv', col_lab = 'pdna_counts_br1')
+tib_cn_br2 <- read_ecn('/DATA/projects/epmatrix/mouse/Split/ecn_NCS/Results/E87_NCS_pDNA_BR2_barcode_counts.tsv', col_lab = 'pdna_counts_br2')
+
+# merge datasets
+tib_Split_NCS_merged_V2 <- merge_ipcr_ecn(tib           = tib_Split_NCS_Combined_Unique_V2, 
+                                   cn_tib_list   = list(tib_cn_br1, tib_cn_br2),
+                                   expr_tib_list = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+
+get_barcode_summary_Split <- function(tib_Split, tib_merged) {
+
+  n_Split    <- nrow(tib_Split)
+  n_Split_mg <- nrow(tib_merged)
+
+  loss_Split <- (n_Split - n_Split_mg) / n_Split * 100
+
+  df <- data.frame(n_Split,
+                   n_Split_mg,
+                   signif(loss_Split, 3))
+
+  df %>%
+    kable(caption = 'Summary of total barcode counts',
+          col.names = c('Split (iPCR)', 'Split (pDNA > 0)', 'Split loss (%)'))
+}
+
+
+get_barcode_summary_Split(tib_Split_NCS_Combined_Unique_V2, tib_Split_NCS_merged_V2)
+```
+
+```{r set params}
+# min number of barcodes
+min_n_bc <- 5
+# min copy number
+min_pdna <- 8
+
+# load genomic coordinates of DAT library
+tib_frag_coord <- read_dat_design('~/mydata/GitLab/epmatrix/data/tad_deconstr_design/designs/fc180410_dat_klf2.bed')
+#add NoP and empty fake coordinates
+tib_frag_coord <- add_row(tib_frag_coord, frag = "NoP", seqnames = "chrN", start = 0, end = 0)
+tib_frag_coord <- add_row(tib_frag_coord, frag = "empty", seqnames = "chrE", start = 0, end = 0)
+```
+
+## process ecn+ipcr
+Make custom processing function
+```{r Process function}
+#adapted function from auto_process function in dattero, does not compute cooperativity, just activities based on averaging method.
+auto_process_Split <- function(tib_Split, tib_dat, min_pdna, min_n_bc, avg_type, signal_t) {
+
+  # sum pdna counts across replicates
+  tib_Split    <- combine_cnSplit(tib_Split)
+
+  # remove barcodes with pDNA reads < threshold
+  tib_Split    <- filter_cn(tib_Split, min_pdna = min_pdna)
+
+  # remove barcodes of elements with < threshold distinct barcodes
+  tib_Split    <- filter_barcodes(tib_Split, min_n_bc = min_n_bc,  main = 'Basal')
+
+  # compute offsets
+  offsets_Split <- tib_Split %>%
+    dplyr::select(contains('dna_counts')) %>%
+    colSums() / 1e6
+  names(offsets_Split) <- names(offsets_Split) %>%
+    str_replace('_counts', '')
+
+  message('Split sum', offsets_Split)
+
+  # normalize to library sizes
+  tib_Split    <- normalize_counts(tib_Split, offsets_Split)
+
+  # compute activities and summarize barcodes
+  tib_Split    <- compute_activities(tib_Split)
+
+  # summarize activities (weighted average)
+  tib_Split    <- summarize_barcodesNCS(tib_Split, type = avg_type)
+
+  #if(missing(signal_t)) {
+
+    # model combinatorial activity distributions
+    #signal_t     <- learn_min_activity(tib_comb)
+
+  #}
+
+  # compute cooperativity
+  
+  
+  #tib_comb_all <- compute_cooperativity(tib_comb, tib_basal, remove_inactive = FALSE)
+
+  # add metadata
+  #tib_basal    <- add_metadata(tib_basal, tib_dat = tib_dat, type = 'basal')
+  tib_Split     <- add_metadataSplit(tib_Split, tib_dat = tib_dat, type = 'comb')
+  #tib_comb_all <- add_metadata(tib_comb_all, tib_dat = tib_dat, type = 'comb')
+
+  # return list of tibs
+  #return(list('basal'    = tib_basal,
+  #            'comb'     = tib_comb,
+  #            'comb_all' = tib_comb_all,
+  #            'signal_t' = signal_t))
+return(tib_Split)
+}
+
+combine_cnSplit <- function(tib) {
+
+  # detect number of replicates based on colnames (diagnostic)
+  n_repl <- dplyr::select(tib, starts_with('pdna_counts_')) %>%
+    ncol
+
+  message('Detected ', n_repl, ' replicates')
+
+  # summarize pDNA counts across replicates
+  tib %>%
+    mutate(pdna_counts = rowSums(dplyr::select(., starts_with('pdna_counts_')))) %>%
+    dplyr::select(-starts_with('pdna_counts_')) %>%
+    dplyr::select(barcode:id, pdna_counts, starts_with('cdna_counts_'),library)
+
+}
+
+add_metadataSplit <- function(tib, tib_dat, type = 'basal') {
+
+  # validate args
+  stopifnot(type %in% c('basal', 'comb'))
+
+  if(type == 'basal') {
+    tib <- tib %>%
+      dplyr::rename(frag = frag1, strand = strand1) %>%
+      dplyr::select(-c(frag2, strand2)) %>%
+      mutate(id    = paste0(frag, strand),
+             class = paste0(substr(id, 1, 1))) %>%
+      left_join(tib_dat, by = 'frag') %>%
+      dplyr::select(id, class, frag, strand, seqnames, start, end, starts_with('activity'))
+  }
+
+  else {
+    tib <- tib %>%
+      mutate(id1   = paste0(frag1, strand1),
+             id2   = paste0(frag2, strand2),
+             id    = paste0(id1, id2),
+             class = paste0(substr(id1, 1, 1), substr(id2, 1, 1))) %>%
+      # add genomic coordinates
+      left_join(tib_dat, by = c('frag1' = 'frag')) %>%
+      dplyr::rename(seqnames1 = seqnames, start1 = start, end1 = end) %>%
+      left_join(tib_dat, by = c('frag2' = 'frag')) %>%
+      dplyr::rename(seqnames2 = seqnames, start2 = start, end2 = end) %>%
+      # group, trick essentially rowwise()
+      group_by(id1, id2,) %>%
+      # distances for trans pairs is set to Inf
+      mutate(dist = ifelse(seqnames1 == seqnames2,
+                           min(abs(end1 - start2), abs(end2 - start1)), Inf)) %>%
+      # reorder to final shape
+      dplyr::select(id, class,
+                    id1, frag1, strand1, seqnames1, start1, end1,
+                    id2, frag2, strand2, seqnames2, start2, end2,
+                    dist, starts_with('activ'), starts_with('boost'), starts_with('coop'),library) %>%
+      ungroup
+  }
+
+  tib
+}
+
+summarize_barcodesNCS <- function(tib, type = 'wa') {
+
+  # stop if type not 'wa'/'avg'
+  if(!type %in% c('wa', 'avg'))
+    stop('type should be equal to wa for a weighted average, or to avg for an arithmetic average')
+
+  # aux function that works on a nested tibble ($data slot)
+  get_summarized_vals <- function(dat, type) {
+
+    # extract pDNA counts
+    pdna_counts <- dat[['pdna_counts']]
+    denom       <- sum(pdna_counts)
+
+    # extract activity values
+    dat <- dat %>%
+      dplyr::select(starts_with('activity_'))
+
+    if(type == 'wa') {
+
+      # summarize barcode activities using a weighted average (w = pdna counts)
+      vec_summarized <- colSums(dat * pdna_counts) / denom
+
+    }
+
+    else {
+
+      # summarize barcode activities using an arithmetic average
+      vec_summarized <- colMeans(dat)
+
+    }
+
+    # take geom mean of activities
+    vec_summarized[['activity_all']] <- prod(vec_summarized) ^ (1 / length(vec_summarized))
+
+    return(vec_summarized)
+  }
+
+  # nest input tibble by element identity
+  tib_nested <- tib %>%
+    group_by(id, frag1, strand1, frag2, strand2, library) %>%
+    nest()
+
+  tib_summarized <- purrr::map(tib_nested$data, get_summarized_vals, type = type) %>%
+    do.call(what = 'rbind') %>%
+    as_data_frame()
+
+  tib_nested %>%
+    # drop data slot = unnest
+    dplyr::select(-data) %>%
+    bind_cols(tib_summarized)
+}
+
+```
+
+
+Process activities
+```{r compute cooperativity tibs}
+#compute activities 
+tib_Split_NCS_Activities_V2          <- auto_process_Split(tib_Split = tib_Split_NCS_merged_V2, 
+                                              tib_dat   = tib_frag_coord,
+                                              min_pdna  = min_pdna, 
+                                              min_n_bc  = min_n_bc, 
+                                              avg_type  = 'avg')
+
+
+
+# Get basal activities (frag1 = empty)
+tib_Split_NCS_Basal_Activities_V2 <- tib_Split_NCS_Activities_V2 %>% filter(frag1=="empty")
+
+
+tib_Split_Basal_Activities_V2 <-  tib_Split_NCS_Activities_V2 %>% 
+  dplyr::filter(frag1=="empty")%>%
+  mutate(Set=ifelse(str_sub(library,1,1)=="N", "NCS", "Split"))%>%
+  filter(Set=="Split")%>% dplyr::rename(activity_frag2_br1=activity_br1, 
+                                     activity_frag2_br2=activity_br2, 
+                                     activity_frag2_br3=activity_br3, 
+                                     activity_frag2_all=activity_all,
+                                     BasalFrag=id )%>%
+                              select(activity_frag2_br1, activity_frag2_br2, activity_frag2_br3, activity_frag2_all, frag2, BasalFrag)
+
+
+
+#combine basal and combinatorial activities
+tib_Split_NCS_Combinatorial_Activities_V2 <- tib_Split_NCS_Activities_V2 %>% filter(frag1!="empty")
+
+tib_Split_NCS_Combinatorial_Activities_joined_V2 <- left_join(tib_Split_NCS_Combinatorial_Activities_V2,tib_Split_NCS_Basal_Activities_V2, by = c("frag2","library") )
+
+tib_Split_NCS_Combinatorial_Activities_joined_SPLIT_V2  <- left_join(tib_Split_NCS_Combinatorial_Activities_V2,tib_Split_Basal_Activities_V2, by = c("frag2") )
+
+
+#compute boosting indexes
+#tib_Split_NCS_avg_V2  <- tib_Split_NCS_Combinatorial_Activities_joined_V2 %>% mutate(boost = log2(activity_all/activity_frag2_all))
+#compute boosting indexes basal split
+tib_Split_NCS_avgSPLIT_V2  <- tib_Split_NCS_Combinatorial_Activities_joined_SPLIT_V2 %>% mutate(boost = log2(activity_all/activity_frag2_all))
+
+```
+
+# Save Dataset
+```{r save tibbles}
+save(list = c('tib_Split_NCS_avgSPLIT_V2', 'tib_Split_NCS_Basal_Activities_V2', 'tib_Split_NCS_Combinatorial_Activities_V2' ),
+     file = '~/mydata/GitLab/epmatrix/data//MMA20200929_Split_NCS_tibs_avg_V2.RData')
+```
+
+
+
+

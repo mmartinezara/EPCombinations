@@ -1,0 +1,809 @@
+---
+title: "MicroCFigure7"
+author: "MMA"
+date: "21/6/2021"
+output: html_document
+---
+
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/Figure7/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(ggpubr)
+library(dplyr)
+library(GGally)  
+library(ggbeeswarm)
+
+library(tidyr)
+library(strawr)
+library(GenomicRanges)
+library(InteractionSet)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(rhdf5)
+library(HiCcompare)
+
+```
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitHub/EPCombinations/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+## Correct Klf2 dist
+
+tib_frag_coord_Klf2 <- read_dat_design('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_klf2.bed')
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+      # add genomic coordinates, extracted from add_metadata dattero function
+      left_join(tib_frag_coord_Klf2, by = c('frag1' = 'frag')) %>%
+      dplyr::rename(seqnames1 = seqnames, start1 = start, end1 = end) %>%
+      left_join(tib_frag_coord_Klf2, by = c('frag2' = 'frag')) %>%
+      dplyr::rename(seqnames2 = seqnames, start2 = start, end2 = end) %>%
+      # group, trick essentially rowwise()
+      group_by(id) %>%
+      # distances for trans pairs is set to Inf
+      mutate(dist = ifelse(seqnames1 == seqnames2,
+                           min(abs(end1 - start2), abs(end2 - start1)), Inf)) %>%
+      # reorder to final shape
+      dplyr::select(id, class, frag1, strand1, seqnames1, start1, end1,
+                    frag2, strand2, seqnames2, start2, end2,
+                    dist, starts_with('activ'), starts_with('boost')) %>%
+      ungroup%>%mutate(DAT="Klf2")%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+## Correct NAnog dist
+
+tib_frag_coord_nanog <- read_dat_design('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_nanog.bed')
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  left_join(tib_frag_coord_nanog, by = c('frag1' = 'frag')) %>%
+      dplyr::rename(seqnames1 = seqnames, start1 = start, end1 = end) %>%
+      left_join(tib_frag_coord_nanog, by = c('frag2' = 'frag')) %>%
+      dplyr::rename(seqnames2 = seqnames, start2 = start, end2 = end) %>%
+      # group, trick essentially rowwise()
+      group_by(id) %>%
+      # distances for trans pairs is set to Inf
+      mutate(dist = ifelse(seqnames1 == seqnames2,
+                           min(abs(end1 - start2), abs(end2 - start1)), Inf)) %>%
+      # reorder to final shape
+      dplyr::select(id, class, frag1, strand1, seqnames1, start1, end1,
+                    frag2, strand2, seqnames2, start2, end2,
+                    dist, starts_with('activ'), starts_with('boost')) %>%
+      ungroup%>%mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+```
+
+# Data loading MicroC
+```{r}
+# .hic data can be loaded using strawr::straw which allows to load only the region you are interested in. You have to load each normalisation separatedly.
+##Load microC data .hic Klf2 locus
+MicroCMatrixKlf2Locus<-strawr::straw(norm="VC",fname="~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_2.6B.hic", unit="BP", binsize=500, chr1loc ="8:71800000:73400000",  chr2loc="8:71800000:73400000" )
+MicroCMatrixKlf2LocusKR<-strawr::straw(norm="KR",fname='~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_2.6B.hic', unit="BP", binsize=500, chr1loc ="8:71800000:73400000",  chr2loc="8:71800000:73400000" )
+head(MicroCMatrixKlf2Locus)
+head(MicroCMatrixKlf2LocusKR)
+
+##Load microC data .hic Tfcp2l1 locus
+MicroCMatrixTFCp2l1Locus<-strawr::straw(norm="VC",fname='~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_2.6B.hic', unit="BP", binsize=500, chr1loc ="1:117719000:120739000",  chr2loc="1:117719000:120739000" )
+MicroCMatrixTFCp2l1LocusKR<-strawr::straw(norm="KR",fname='~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_2.6B.hic', unit="BP", binsize=500, chr1loc ="1:117719000:120739000",  chr2loc="1:117719000:120739000" )
+head(MicroCMatrixKlf2Locus)
+head(MicroCMatrixKlf2LocusKR)
+
+##Load microC data .hic Nanog locus
+MicroCMatrixNanogLocus<-strawr::straw(norm="VC",fname='~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_2.6B.hic', unit="BP", binsize=500, chr1loc ="6:122293000:123337000",  chr2loc="6:122293000:123337000" )
+MicroCMatrixNanogLocusKR<-strawr::straw(norm="KR",fname='~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_2.6B.hic', unit="BP", binsize=500, chr1loc ="6:122293000:123337000",  chr2loc="6:122293000:123337000" )
+head(MicroCMatrixKlf2Locus)
+head(MicroCMatrixKlf2LocusKR)
+
+## Load obs/exp transformed microC data from .cool files
+#Load mcool file. method taken from cooler2bedpe function in HiCcompare
+####Klf2 locus
+Klf2dump <- rhdf5::h5dump("~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_1.3B_obs_exp_chr8_z15.cool")
+# the set 17 is the highest resolution set. 0 is lowest resolution
+#set 15 s 400bp resoluion
+#from cooler2bedpe function in HiCcompare
+idsKlf2 <- data.frame(chr = Klf2dump$bins$chrom, start = Klf2dump$bins$start, end = Klf2dump$bins$end, id = seq(1, length(Klf2dump$bins$chrom), by = 1))
+matKlf2 <- data.frame(bin1 = Klf2dump$pixels$bin1_id, bin2 = Klf2dump$pixels$bin2_id, IF = Klf2dump$pixels$count)
+  # use hicpro2bedpe to convert to useable format
+  bedpeMicroC_Klf2_OE <- hicpro2bedpe(matKlf2, idsKlf2)
+
+####Nanog locus
+Nanogdump <- rhdf5::h5dump("~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_1.3B_obs_exp_chr6_z15.cool")
+# the set 17 is the highest resolution set. 0 is lowest resolution
+#set 15 s 400bp resoluion
+#from cooler2bedpe function in HiCcompare
+idsNanog <- data.frame(chr = Nanogdump$bins$chrom, start = Nanogdump$bins$start, end = Nanogdump$bins$end, id = seq(1, length(Nanogdump$bins$chrom), by = 1))
+matNanog <- data.frame(bin1 = Nanogdump$pixels$bin1_id, bin2 = Nanogdump$pixels$bin2_id, IF = Nanogdump$pixels$count)
+  # use hicpro2bedpe to convert to useable format
+  bedpeMicroC_Nanog_OE <- hicpro2bedpe(matNanog, idsNanog)
+
+####Tfcp2l1 locus
+Tfcp2l1dump <- rhdf5::h5dump("~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_1.3B_obs_exp_chr1_z15.cool")
+# the set 17 is the highest resolution set. 0 is lowest resolution
+#set 15 s 400bp resoluion
+#from cooler2bedpe function in HiCcompare
+idsTfcp2l1 <- data.frame(chr = Tfcp2l1dump$bins$chrom, start = Tfcp2l1dump$bins$start, end = Tfcp2l1dump$bins$end, id = seq(1, length(Tfcp2l1dump$bins$chrom), by = 1))
+matTfcp2l1 <- data.frame(bin1 = Tfcp2l1dump$pixels$bin1_id, bin2 = Tfcp2l1dump$pixels$bin2_id, IF = Tfcp2l1dump$pixels$count)
+  # use hicpro2bedpe to convert to useable format
+  bedpeMicroC_Tfcp2l1_OE <- hicpro2bedpe(matTfcp2l1, idsTfcp2l1)
+
+```
+
+### Clean environment
+```{r}
+#Otherwise Rstudio may crash due to memory issues
+rm(Klf2dump)
+rm(Nanogdump)
+rm(Tfcp2l1dump)
+rm(matKlf2)
+rm(matNanog)
+rm(matTfcp2l1)
+rm(idsKlf2)
+rm(idsNanog)
+rm(idsTfcp2l1)
+
+```
+# Data post-processing
+##Klf2
+```{r}
+#Create Interaction Set with both measures
+range1 <- GRanges("chr8", IRanges(MicroCMatrixKlf2Locus$x, MicroCMatrixKlf2Locus$x+500))
+range2 <- GRanges("chr8", IRanges(MicroCMatrixKlf2Locus$y, MicroCMatrixKlf2Locus$y+500))
+gi <- GInteractions(range1, range2)
+gi$normfreq_VC <- MicroCMatrixKlf2Locus$counts
+
+gi$KR <- MicroCMatrixKlf2LocusKR$counts
+
+head(gi)
+
+
+Klf2EPs<-rtracklayer::import('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_klf2.bed', format = "BED" )
+head(Klf2EPs)
+# Extend range 500 bp to facilitate finding overlaping fragments
+start(Klf2EPs) <- start(Klf2EPs) - 250
+end(Klf2EPs) <- end(Klf2EPs) + 250
+#all.genes <- GRanges("chrA", IRanges(0:9*10, 1:10*10))
+#all.enhancers <- GRanges("chrB", IRanges(0:9*10, 1:10*10))
+olap <- linkOverlaps(gi, Klf2EPs, Klf2EPs)
+#gi[queryHits(olap)]
+IntFreq_VC<-gi[olap$query]$normfreq_VC
+KR<-gi[olap$query]$KR
+Frag1<-Klf2EPs[olap$subject1]$name
+Frag2<-Klf2EPs[olap$subject2]$name
+IntMAtrix<-tibble(Frag1,Frag2,IntFreq_VC, KR)
+#clean
+rm(gi)
+rm(range1)
+rm(range2)
+rm(olap)
+rm(Frag1)
+rm(Frag2)
+```
+
+```{r}
+
+IntMAtrixKlf2<- IntMAtrix%>%
+  group_by(Frag1,Frag2)%>%
+  dplyr::summarise(meanIntVC=sum(IntFreq_VC)/dplyr::n(), meanKR=sum(KR)/dplyr::n())%>%
+  ungroup()%>%
+  mutate(prefix = str_sub(Frag1, 1, 1),
+           Frag1 = str_remove(Frag1, '_.*'),
+           Frag1 = str_remove(Frag1, '[EP]'),
+           Frag1 = str_pad(Frag1, width = 3, pad = '0'),
+           Frag1 = paste0(prefix, Frag1)) %>%
+    dplyr::select(-prefix)%>%
+   mutate(prefix = str_sub(Frag2, 1, 1),
+           Frag2 = str_remove(Frag2, '_.*'),
+           Frag2 = str_remove(Frag2, '[EP]'),
+           Frag2 = str_pad(Frag2, width = 3, pad = '0'),
+           Frag2 = paste0(prefix, Frag2)) %>%
+    dplyr::select(-prefix)%>%
+mutate(frag1=Frag1)%>%
+  mutate(frag2=Frag2)%>%
+  select(-Frag1,-Frag2)
+  #mutate(id1=paste0(Frag1,Frag2))%>%
+  #mutate(id2=paste0(Frag2,Frag1))
+```
+
+
+### O/E
+```{r}
+#Create Interaction Set with both measures
+range1OE <- GRanges("chr8", IRanges(bedpeMicroC_Klf2_OE$cis$chr8$start1, bedpeMicroC_Klf2_OE$cis$chr8$end1))
+range2OE <- GRanges("chr8", IRanges(bedpeMicroC_Klf2_OE$cis$chr8$start2, bedpeMicroC_Klf2_OE$cis$chr8$end2))
+giOE <- GInteractions(range1OE, range2OE)
+giOE$ObsExp <- bedpeMicroC_Klf2_OE$cis$chr8$IF
+
+olapOE <- linkOverlaps(giOE, Klf2EPs, Klf2EPs)
+#gi[queryHits(olap)]
+ObsExp<-giOE[olapOE$query]$ObsExp
+
+Frag1OE<-Klf2EPs[olapOE$subject1]$name
+Frag2OE<-Klf2EPs[olapOE$subject2]$name
+IntMAtrixOE<-tibble(Frag1OE,Frag2OE,ObsExp)
+#clean environment to free memory
+rm(bedpeMicroC_Klf2_OE)
+rm(range1OE)
+rm(range2OE)
+rm(giOE)
+rm(olapOE)
+rm(Klf2EPs)
+rm(Frag1OE)
+rm(Frag2OE)
+```
+
+```{r}
+IntMAtrixKlf2ObsExp<- IntMAtrixOE%>%
+  mutate(Frag1=Frag1OE)%>%
+  mutate(Frag2=Frag2OE)%>%  
+  group_by(Frag1,Frag2)%>%
+  summarise(meanObsExp=sum(ObsExp)/dplyr::n())%>%
+  ungroup()%>%
+  mutate(prefix = str_sub(Frag1, 1, 1),
+           Frag1 = str_remove(Frag1, '_.*'),
+           Frag1 = str_remove(Frag1, '[EP]'),
+           Frag1 = str_pad(Frag1, width = 3, pad = '0'),
+           Frag1 = paste0(prefix, Frag1)) %>%
+    dplyr::select(-prefix)%>%
+   mutate(prefix = str_sub(Frag2, 1, 1),
+           Frag2 = str_remove(Frag2, '_.*'),
+           Frag2 = str_remove(Frag2, '[EP]'),
+           Frag2 = str_pad(Frag2, width = 3, pad = '0'),
+           Frag2 = paste0(prefix, Frag2)) %>%
+    dplyr::select(-prefix)%>%
+mutate(frag1=Frag1)%>%
+  mutate(frag2=Frag2)%>%
+  select(-Frag1,-Frag2)
+  #mutate(id1=paste0(Frag1,Frag2))%>%
+  #mutate(id2=paste0(Frag2,Frag1))
+
+```
+
+```{r}
+#merge ints and Obs/exp
+
+IntMAtrixKlf2_all<-full_join(IntMAtrixKlf2ObsExp, IntMAtrixKlf2, by=c("frag1","frag2"))%>%
+  mutate(DAT="Klf2")
+```
+
+
+## Nanog
+
+```{r}
+#Create Interaction Set with both measures
+range1N <- GRanges("chr6", IRanges(MicroCMatrixNanogLocus$x, MicroCMatrixNanogLocus$x+500))
+range2N <- GRanges("chr6", IRanges(MicroCMatrixNanogLocus$y, MicroCMatrixNanogLocus$y+500))
+giN <- GInteractions(range1N, range2N)
+giN$normfreq_VC <- MicroCMatrixNanogLocus$counts
+
+giN$KR <- MicroCMatrixNanogLocusKR$counts
+
+NanogEPs<-rtracklayer::import('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_nanog.bed', format = "BED" )
+# Extend range 500 bp to facilitate finding overlaping fragments
+start(NanogEPs) <- start(NanogEPs) - 250
+end(NanogEPs) <- end(NanogEPs) + 250
+# get overlaps between EPs and 500bp HiC bins
+olapN <- linkOverlaps(giN, NanogEPs, NanogEPs)
+#gi[queryHits(olap)]
+IntFreq_VCN<-giN[olapN$query]$normfreq_VC
+KRN<-giN[olapN$query]$KR
+Frag1N<-NanogEPs[olapN$subject1]$name
+Frag2N<-NanogEPs[olapN$subject2]$name
+IntMAtrixN<-tibble(Frag1N,Frag2N,IntFreq_VCN, KRN)
+#clean environment to free memory
+rm(MicroCMatrixNanogLocus)
+rm(range1N)
+rm(range2N)
+rm(giN)
+rm(olapN)
+rm(Frag1N)
+rm(Frag2N)
+```
+
+```{r}
+IntMAtrixNanog<- IntMAtrixN%>%
+  mutate(Frag1=Frag1N)%>%
+  mutate(Frag2=Frag2N)%>% 
+  group_by(Frag1,Frag2)%>%
+  summarise(meanIntVC=sum(IntFreq_VCN)/dplyr::n(), meanKR=sum(KRN)/dplyr::n())%>%
+  ungroup()%>%
+  mutate(prefix = str_sub(Frag1, 1, 1),
+           Frag1 = str_remove(Frag1, '_.*'),
+           Frag1 = str_remove(Frag1, '[EP]'),
+           Frag1 = str_pad(Frag1, width = 3, pad = '0'),
+           Frag1 = paste0(prefix, Frag1)) %>%
+    dplyr::select(-prefix)%>%
+   mutate(prefix = str_sub(Frag2, 1, 1),
+           Frag2 = str_remove(Frag2, '_.*'),
+           Frag2 = str_remove(Frag2, '[EP]'),
+           Frag2 = str_pad(Frag2, width = 3, pad = '0'),
+           Frag2 = paste0(prefix, Frag2)) %>%
+    dplyr::select(-prefix)%>%
+mutate(frag1=Frag1)%>%
+  mutate(frag2=Frag2)%>%
+  select(-Frag1,-Frag2)
+  #mutate(id1=paste0(Frag1,Frag2))%>%
+  #mutate(id2=paste0(Frag2,Frag1))
+```
+
+### O/E
+
+```{r}
+#Create Interaction Set with both measures
+range1OEN <- GRanges("chr6", IRanges(bedpeMicroC_Nanog_OE$cis$chr6$start1, bedpeMicroC_Nanog_OE$cis$chr6$end1))
+range2OEN <- GRanges("chr6", IRanges(bedpeMicroC_Nanog_OE$cis$chr6$start2, bedpeMicroC_Nanog_OE$cis$chr6$end2))
+giOEN <- GInteractions(range1OEN, range2OEN)
+giOEN$ObsExp <- bedpeMicroC_Nanog_OE$cis$chr6$IF
+
+olapOEN <- linkOverlaps(giOEN, NanogEPs, NanogEPs)
+#gi[queryHits(olap)]
+ObsExpN<-giOEN[olapOEN$query]$ObsExp
+
+Frag1OEN<-NanogEPs[olapOEN$subject1]$name
+Frag2OEN<-NanogEPs[olapOEN$subject2]$name
+IntMAtrixOEN<-tibble(Frag1OEN,Frag2OEN,ObsExpN)
+#clean environment to free memory
+rm(bedpeMicroC_Nanog_OE)
+rm(range1OEN)
+rm(range2OEN)
+rm(olapOEN)
+rm(giOEN)
+rm(Frag1OEN)
+rm(Frag2OEN)
+rm(ObsExpN)
+rm(NanogEPs)
+```
+
+```{r}
+IntMAtrixNanogObsExp<- IntMAtrixOEN%>%
+  mutate(Frag1=Frag1OEN)%>%
+  mutate(Frag2=Frag2OEN)%>%  
+  group_by(Frag1,Frag2)%>%
+  summarise(meanObsExp=sum(ObsExpN)/dplyr::n())%>%
+  ungroup()%>%
+  mutate(prefix = str_sub(Frag1, 1, 1),
+           Frag1 = str_remove(Frag1, '_.*'),
+           Frag1 = str_remove(Frag1, '[EP]'),
+           Frag1 = str_pad(Frag1, width = 3, pad = '0'),
+           Frag1 = paste0(prefix, Frag1)) %>%
+    dplyr::select(-prefix)%>%
+   mutate(prefix = str_sub(Frag2, 1, 1),
+           Frag2 = str_remove(Frag2, '_.*'),
+           Frag2 = str_remove(Frag2, '[EP]'),
+           Frag2 = str_pad(Frag2, width = 3, pad = '0'),
+           Frag2 = paste0(prefix, Frag2)) %>%
+    dplyr::select(-prefix)%>%
+mutate(frag1=Frag1)%>%
+  mutate(frag2=Frag2)%>%
+  select(-Frag1,-Frag2)
+  #mutate(id1=paste0(Frag1,Frag2))%>%
+  #mutate(id2=paste0(Frag2,Frag1))
+
+```
+
+### merge data Nanog
+
+
+```{r}
+#merge ints and Obs/exp
+
+IntMAtrixNanog_all<-full_join(IntMAtrixNanogObsExp, IntMAtrixNanog, by=c("frag1","frag2"))%>%
+  mutate(DAT="Nanog")
+```
+
+
+## Tfcp2l1
+
+```{r}
+#Create Interaction Set with both measures
+range1T <- GRanges("chr1", IRanges(MicroCMatrixTFCp2l1Locus$x, MicroCMatrixTFCp2l1Locus$x+500))
+range2T <- GRanges("chr1", IRanges(MicroCMatrixTFCp2l1Locus$y, MicroCMatrixTFCp2l1Locus$y+500))
+giT <- GInteractions(range1T, range2T)
+giT$normfreq_VC <- MicroCMatrixTFCp2l1Locus$counts
+
+giT$KR <- MicroCMatrixTFCp2l1LocusKR$counts
+
+Tfcp2l1EPs<-rtracklayer::import('~/mydata/GitHub/EPCombinations/data/tad_deconstr_design/designs/fc180410_dat_tfcp2l1.bed', format = "BED" )
+# Extend range 500 bp to facilitate finding overlaping fragments
+start(Tfcp2l1EPs) <- start(Tfcp2l1EPs) - 250
+end(Tfcp2l1EPs) <- end(Tfcp2l1EPs) + 250
+# get overlaps between EPs and 500bp HiC bins
+olapT <- linkOverlaps(giT, Tfcp2l1EPs, Tfcp2l1EPs)
+#gi[queryHits(olap)]
+IntFreq_VCT<-giT[olapT$query]$normfreq_VC
+KRT<-giT[olapT$query]$KR
+Frag1T<-Tfcp2l1EPs[olapT$subject1]$name
+Frag2T<-Tfcp2l1EPs[olapT$subject2]$name
+IntMAtrixT<-tibble(Frag1T,Frag2T,IntFreq_VCT, KRT)
+#clean environment
+rm(giT)
+rm(range1T)
+rm(range2T)
+rm(olapT)
+rm(Frag1T)
+rm(Frag2T)
+```
+
+```{r}
+IntMAtrixTfcp2l1<- IntMAtrixT%>%
+  mutate(Frag1=Frag1T)%>%
+  mutate(Frag2=Frag2T)%>% 
+  group_by(Frag1,Frag2)%>%
+  summarise(meanIntVC=sum(IntFreq_VCT)/dplyr::n(), meanKR=sum(KRT)/dplyr::n())%>%
+  ungroup()%>%
+  mutate(prefix = str_sub(Frag1, 1, 1),
+           Frag1 = str_remove(Frag1, '_.*'),
+           Frag1 = str_remove(Frag1, '[EP]'),
+           Frag1 = str_pad(Frag1, width = 3, pad = '0'),
+           Frag1 = paste0(prefix, Frag1)) %>%
+    dplyr::select(-prefix)%>%
+   mutate(prefix = str_sub(Frag2, 1, 1),
+           Frag2 = str_remove(Frag2, '_.*'),
+           Frag2 = str_remove(Frag2, '[EP]'),
+           Frag2 = str_pad(Frag2, width = 3, pad = '0'),
+           Frag2 = paste0(prefix, Frag2)) %>%
+    dplyr::select(-prefix)%>%
+mutate(frag1=Frag1)%>%
+  mutate(frag2=Frag2)%>%
+  select(-Frag1,-Frag2)
+  #mutate(id1=paste0(Frag1,Frag2))%>%
+  #mutate(id2=paste0(Frag2,Frag1))
+```
+
+### O/E
+
+```{r}
+#Create Interaction Set with both measures
+range1OET <- GRanges("chr1", IRanges(bedpeMicroC_Tfcp2l1_OE$cis$chr1$start1, bedpeMicroC_Tfcp2l1_OE$cis$chr1$end1))
+range2OET <- GRanges("chr1", IRanges(bedpeMicroC_Tfcp2l1_OE$cis$chr1$start2, bedpeMicroC_Tfcp2l1_OE$cis$chr1$end2))
+giOET <- GInteractions(range1OET, range2OET)
+giOET$ObsExp <- bedpeMicroC_Tfcp2l1_OE$cis$chr1$IF
+
+olapOET <- linkOverlaps(giOET, Tfcp2l1EPs, Tfcp2l1EPs)
+#gi[queryHits(olap)]
+ObsExpT<-giOET[olapOET$query]$ObsExp
+
+Frag1OET<-Tfcp2l1EPs[olapOET$subject1]$name
+Frag2OET<-Tfcp2l1EPs[olapOET$subject2]$name
+IntMAtrixOET<-tibble(Frag1OET,Frag2OET,ObsExpT)
+#clean environment to free memory
+rm(bedpeMicroC_Tfcp2l1_OE)
+rm(range1OET)
+rm(range2OET)
+rm(giOET)
+rm(olapOET)
+rm(Frag1OET)
+rm(Frag2OET)
+rm(ObsExpT)
+rm(Tfcp2l1EPs)
+```
+
+```{r}
+IntMAtrixTfcp2l1ObsExp<- IntMAtrixOET%>%
+  mutate(Frag1=Frag1OET)%>%
+  mutate(Frag2=Frag2OET)%>%  
+  group_by(Frag1,Frag2)%>%
+  summarise(meanObsExp=sum(ObsExpT)/dplyr::n())%>%
+  ungroup()%>%
+  mutate(prefix = str_sub(Frag1, 1, 1),
+           Frag1 = str_remove(Frag1, '_.*'),
+           Frag1 = str_remove(Frag1, '[EP]'),
+           Frag1 = str_pad(Frag1, width = 3, pad = '0'),
+           Frag1 = paste0(prefix, Frag1)) %>%
+    dplyr::select(-prefix)%>%
+   mutate(prefix = str_sub(Frag2, 1, 1),
+           Frag2 = str_remove(Frag2, '_.*'),
+           Frag2 = str_remove(Frag2, '[EP]'),
+           Frag2 = str_pad(Frag2, width = 3, pad = '0'),
+           Frag2 = paste0(prefix, Frag2)) %>%
+    dplyr::select(-prefix)%>%
+mutate(frag1=Frag1)%>%
+  mutate(frag2=Frag2)%>%
+  select(-Frag1,-Frag2)
+  #mutate(id1=paste0(Frag1,Frag2))%>%
+  #mutate(id2=paste0(Frag2,Frag1))
+
+```
+### merge data Tfcp2l1
+
+
+```{r}
+#merge ints and Obs/exp
+
+IntMAtrixTfcp2l1_all<-full_join(IntMAtrixTfcp2l1ObsExp, IntMAtrixTfcp2l1, by=c("frag1","frag2"))%>%
+  mutate(DAT="Tfcp2l1")
+```
+
+## merge 3 MicroC datasets
+
+```{r}
+IntMAtrix_all_all<-bind_rows(IntMAtrixTfcp2l1_all, IntMAtrixKlf2_all, IntMAtrixNanog_all)
+```
+
+
+# merge with Matrix data and plot
+
+```{r}
+#quantify dropout
+inner_join(all_comball, IntMAtrix_all_all, by=c("frag1","frag2", "DAT"))%>%
+  filter(class=="EP")%>%
+  nrow()
+
+all_comball%>%
+  filter(class=="EP")%>%
+  nrow()
+
+# Aprox 30% of EP combs are not seen in HiC data
+
+inner_join(all_comball, IntMAtrix_all_all, by=c("frag1","frag2", "DAT"))%>%
+  filter(class=="EE")%>%
+  nrow()
+
+all_comball%>%
+  filter(class=="EE")%>%
+  nrow()
+
+# Aprox 40% of EP combs are not seen in HiC data
+#merge rescaled data with MicroC data
+all_comball_MicroC<-inner_join(all_comball, IntMAtrix_all_all, by=c("frag1","frag2", "DAT"))
+
+```
+
+
+
+## make plots
+
+
+```{r  OEvsBoost, fig.width=5, fig.height=5}
+all_comball%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   #mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),class=unique(class))%>%
+  nrow()
+
+# 3342 EP+ pairs available
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  nrow()
+# 2156 EP+ pairs seen in MicroC data
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanObsExp>0.01)%>%
+nrow()
+# 1397 EP+ pairs seen in O/E MicroC data
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanObsExp>0.01)%>%
+  ggplot(aes(log10(meanObsExp),boost))+
+        geom_point(size=0.8, alpha=0.8)+
+  #facet_grid(class~.)+
+  theme_bw()+
+   stat_cor()+
+  geom_smooth(method=lm)+
+  ggtitle("O/E contact vs Boost, Downstream")+
+  labs(caption = "n=1397 cCREP+ pairs")
+```
+
+```{r DistvsBoost, fig.width=10, fig.height=5}
+
+all_comball%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+  #filter(activity_all_frag2>100)%>%
+  #filter(dist>100)%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   #mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed), dist=mean(dist),class=unique(class))%>%
+  #filter(meanObsExp>0.01)%>%
+  ggplot(aes(log10(dist),boost))+
+      geom_point(size=0.8, alpha=0.5)+
+  #facet_grid(class~.)+
+  theme_bw()+
+  geom_smooth(method=lm)+
+  stat_cor()+
+  ggtitle("Dist vs Boost, Upstream")+
+
+  labs(caption = "n=3,342 cCREP+ pairs")
+```
+
+```{r contactFreqvsBoost_, fig.width=5, fig.height=5}
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanKR>0.01)%>%
+  ggplot(aes(log10(meanKR),boost))+
+    geom_point(size=0.5, alpha=0.5)+
+  #facet_grid(class~.)+
+  theme_bw()+
+  geom_smooth(method=lm)+
+   stat_cor()+
+  ggtitle("KR contact vs Boost, Upstream")+
+  labs(caption = "n=2065 cCREP+ pairs")
+```
+
+
+
+```{r contactFreqbyBoost_, fig.width=5, fig.height=5}
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanKR>0.01)%>%
+  ggplot(aes(boost,log2((meanKR*2^(boost)))))+
+    geom_point(size=0.5, alpha=0.5)+
+  #facet_grid(class~.)+
+  theme_bw()+
+  geom_smooth(method=lm)+
+   stat_cor()+
+  ggtitle("KR contact vs Boost, Upstream")+
+  labs(caption = "n=2065 cCREP+ pairs")
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanKR>0.01)%>%
+  ggplot(aes(log10(meanKR),(log10(meanKR)*(boost))))+
+    geom_point(size=0.5, alpha=0.5)+
+  #facet_grid(class~.)+
+  theme_bw()+
+  geom_smooth(method=lm)+
+   stat_cor()+
+  ggtitle("KR contact vs Boost, Upstream")+
+  labs(caption = "n=2065 cCREP+ pairs")
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanKR>0.01)%>%
+  ggplot(aes((meanKR)*(boost)))+
+    geom_histogram()+
+  theme_bw()
+
+
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanKR>0.01)%>%
+  ggplot(aes(log10(meanKR),(meanKR)*(boost)))+
+    geom_point(size=0.5, alpha=0.5)+
+  #facet_grid(class~.)+
+  theme_bw()+
+  geom_smooth(method=lm)+
+   stat_cor()+
+  ggtitle("KR contact vs Boost, Upstream")+
+  labs(caption = "n=2065 cCREP+ pairs")
+
+all_comball_MicroC%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2, strand2))%>%
+    mutate(id1=paste0(frag1, strand1))%>%
+  filter(strand2=="+")%>%
+ group_by(frag1,id2, DAT)%>%
+  filter(!BoostPerPmed%in%c(NA, -Inf,Inf, NaN))%>%
+   mutate(meanObsExp=replace_na(meanObsExp,0.01))%>%
+  summarise(boost=mean(BoostPerPmed),meanKR=mean(meanKR), meanObsExp=mean(meanObsExp), dist=mean(dist), meanIntVC=mean(meanIntVC),class=unique(class))%>%
+  filter(meanKR>0.01)%>%
+  ggplot(aes(log10(meanKR),(meanKR)^2*(boost)))+
+    geom_point(size=0.5, alpha=0.5)+
+  #facet_grid(class~.)+
+  theme_bw()+
+  geom_smooth(method=lm)+
+   stat_cor()+
+  ggtitle("KR contact vs Boost, Upstream")+
+  labs(caption = "n=2065 cCREP+ pairs")
+```
+
+

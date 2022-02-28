@@ -1,0 +1,231 @@
+---
+title: "FigureS4_OrientPosDep_MMA20210817"
+author: "MMA"
+date: "2/4/2020"
+output:
+  pdf_document:
+    fig_caption: yes
+    toc: yes
+  html_document: 
+    toc: yes
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitHub/EPCombinationsx/rproj/FiguresPaper/FigureS4/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(dplyr)
+library(GGally)  
+library(ggbeeswarm)
+
+```
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitHub/EPCombinations/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitHub/EPCombinations/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="klf2")%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+
+```
+
+
+# Correlation 2 assays, Position independence
+
+```{r PositionCorr, fig.width=5, fig.height=5}
+DownstreamAveraged<-tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+    mutate(id1=paste0(frag1))%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(class=="EP")%>%
+  group_by(id2,id1)%>%
+  summarise(meanBoostPerPmedDown=mean(BoostPerPmed))%>%
+  ungroup()
+  
+
+allKlfcombNCAdj_all%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1))%>%
+ # mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(class=="EP")%>%
+  group_by(id2,id1)%>%
+  summarise(meanBoostPerPmedUp=mean(BoostPerPmed))%>%
+  ungroup()%>%
+  left_join(DownstreamAveraged,by=c("id1","id2"))%>%
+  ggplot(aes(meanBoostPerPmedUp,meanBoostPerPmedDown))+
+  geom_point()+
+  stat_cor()+
+  geom_smooth(method = "lm")+
+  ggtitle("correlation UP Down average both orientations")+
+  coord_fixed(ratio = 1)+ theme_bw()
+```
+```{r PositionCorr_AVG, fig.width=5, fig.height=5}
+  
+
+allKlfcombNCAdj_all%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1))%>%
+ # mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(class=="EP")%>%
+  group_by(id2,id1)%>%
+  summarise(meanBoostPerPmedUp=mean(BoostPerPmed))%>%
+  ungroup()%>%
+  left_join(DownstreamAveraged,by=c("id1","id2"))%>%
+  ungroup()%>%
+  group_by(id1)%>%
+  filter(!meanBoostPerPmedUp%in%c(NA,Inf,-Inf))%>%
+    filter(!meanBoostPerPmedDown%in%c(NA,Inf,-Inf))%>%
+  summarise(AVGBoostUP=mean(meanBoostPerPmedUp), AVGBoostDOWN=mean(meanBoostPerPmedDown))%>%
+  ggplot(aes(AVGBoostUP,AVGBoostDOWN))+
+  geom_point()+
+  stat_cor()+
+  geom_smooth(method = "lm")+
+  ggtitle("correlation UP Down average cRE effect")+
+  theme_bw()
+  coord_fixed(ratio = 1)
+```
+
+# Orientation independence
+
+```{r OrientCorr_UP, fig.width=5, fig.height=5}
+AllEPPlus<-all_comball%>% 
+  filter(class=="EP")%>%
+    filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(strand1=="+")%>%
+  mutate(BoostPerPmedPlus=BoostPerPmed)
+  
+
+all_comball%>% 
+  filter(class=="EP")%>%
+    filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(strand1=="-")%>%
+  mutate(BoostPerPmedMinus=BoostPerPmed)%>%
+  inner_join(AllEPPlus,by=c("frag1","frag2", "DAT"))%>%
+  mutate(DirecIndex=log2(activity_all_frag1.x/activity_all_frag1.y))%>%
+  ggplot(aes(BoostPerPmedPlus,BoostPerPmedMinus, color=DirecIndex))+
+  geom_point()+
+  stat_cor()+
+  geom_smooth(method = "lm")+
+  coord_fixed(ratio = 1)+
+  ggtitle("correlation Plus Minus")+
+  geom_density_2d()+
+  scale_colour_gradient2(low ="#00A600", high ="#ECB176", mid="#F9F3F3" , midpoint = 0)+
+  theme_bw()
+
+all_comball%>% 
+  filter(class=="EP")%>%
+    filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(strand1=="-")%>%
+  mutate(BoostPerPmedMinus=BoostPerPmed)%>%
+  inner_join(AllEPPlus,by=c("frag1","frag2", "DAT"))%>%
+  mutate(DirecIndex=log2(activity_all_frag1.x/activity_all_frag1.y))%>%
+  ggplot(aes(BoostPerPmedPlus,BoostPerPmedMinus))+
+  geom_point()+
+  stat_cor()+
+  geom_smooth(method = "lm")+
+  coord_fixed(ratio = 1)+
+  ggtitle("correlation Plus Minus")+
+  geom_density_2d()+
+  theme_bw()
+```
+
+```{r  OrientCorr_DOWN}
+AllEPPlusDown<-tib_Split_NCS_avgSPLIT_V2Adj_all%>% 
+  filter(class=="EP")%>%
+    filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(strand1=="+")%>%
+  mutate(BoostPerPmedPlus=BoostPerPmed)
+  
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>% 
+  filter(class=="EP")%>%
+    filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(strand1=="-")%>%
+  mutate(BoostPerPmedMinus=BoostPerPmed)%>%
+  inner_join(AllEPPlusDown,by=c("frag1","frag2"))%>%
+  #mutate(DirecIndex=log2(activity_all_frag1.x/activity_all_frag1.y))%>%
+  ggplot(aes(BoostPerPmedPlus,BoostPerPmedMinus))+
+  geom_point()+
+  stat_cor()+
+  geom_smooth(method = "lm")+
+  coord_fixed(ratio = 1)+
+  ggtitle("correlation Plus Minus Downstream")+
+  scale_colour_gradient2(low ="#00A600", high ="#ECB176",  midpoint = 0)+
+  theme_bw()
+```
+
+```{r}
+sessionInfo()
+```
+
+

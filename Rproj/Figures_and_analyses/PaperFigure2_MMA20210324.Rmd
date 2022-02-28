@@ -1,0 +1,1060 @@
+---
+title: "Figure1V2_EPcombinations_MMA20210324"
+author: "MMA"
+date: "2/4/2020"
+output:
+  html_document: 
+    toc: yes
+  pdf_document:
+    fig_caption: yes
+    toc: yes
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(
+	fig.align = "center",
+	fig.path = "~/mydata/GitLab/epmatrix/rproj/FiguresPaper/Figure1V2/",
+	fig.pos = "H",
+	message = FALSE,
+	warning = FALSE,
+	dev = c("pdf"),
+	dpi = 500,
+	include = TRUE
+)
+```
+
+#load libraries
+```{r libs and fun, include=FALSE}
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(scales)
+library(heatmaply)
+library(here)
+library(ggpubr)
+library(dplyr)
+library(GGally)  
+library(ggbeeswarm)
+
+```
+
+
+# Load data
+```{r}
+#load klf2 and NCKLF2  
+load('~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+#The 2 libs are contained in the same 
+#save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all', 'Klf2ClustersKmeans4' ),
+#     file = '~/mydata/GitLab/epmatrix/data/MMA20201204_NormAssays_Clusters.RData')
+
+# Load Nanog tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Nanog.RData')
+
+#load Tfcp2l1 tibs
+load('~/mydata/GitLab/epmatrix/data/MMA20210323_NormResc_Tfcp2l1.RData')
+```
+
+
+```{r}
+
+tfcp2l1_comball<-allcomb_tfcp2Adj_all %>%
+    #filter(library=="tfcp2l1comb")%>%
+  mutate(DAT="Tfcp2l1")%>%
+  mutate(idDAt=paste(id,"Tfcp2l1",sep = "_"))
+
+Klf2_comball<-allKlfcombNCAdj_all %>%
+  filter(library=="klf2comb")%>%
+  mutate(DAT="klf2")%>%
+  mutate(idDAt=paste(id,"Klf2",sep = "_"))
+
+Nanog_comball<-allcomb_NanogAdj_all %>%
+ filter(library=="nanogcomb")%>%
+  mutate(DAT="Nanog")%>%
+  mutate(idDAt=paste(id,"Nanog",sep = "_"))
+
+all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
+
+
+```
+
+#	single elements activities and nrs
+
+```{r}
+# Nr of distinct candidate regulatory elements present in the combinatorial libraries.
+all_comball%>% 
+  filter(class=="EP")%>%
+  distinct(frag1, DAT)%>%
+  group_by(DAT)%>%
+  summarise(n())
+```
+```{r }
+# Nr of distinct Promoters present in the combinatorial libraries.
+all_comball%>% 
+  filter(class=="EP")%>%
+  distinct(frag2, DAT)%>%
+  group_by(DAT)%>%
+  summarise(n())
+```
+
+```{r BasalActivitiesKlf2, fig.width = 4, fig.height = 7}
+# To be updated
+#Klf2
+#plot_basal_activity(tibs_b2_klf2[['basal']], orient = TRUE)+
+#     ylim(c(-7.5,5))
+```
+
+
+```{r BasalActivitiesNanog, fig.width = 4, fig.height = 7}
+# To be updated
+#Nanog
+#plot_basal_activity(tibs_b2[['basal']], orient = TRUE)+
+#   ylim(c(-7.5,5))
+```
+
+```{r BasalActivitiesTfcp2l1, fig.width = 4, fig.height = 7}
+# To be updated
+#Tfcp2l1
+#plot_basal_activity(tibs[['basal']], orient = TRUE)+
+#   ylim(c(-7.5,5))
+```
+#	Combinations types, nrs and activities
+
+```{r CombNrsUpstreamAssay, fig.width = 5, fig.height = 5}
+# NR of combinations
+all_comball%>%filter(class=="EP")%>%
+  #group_by(DAT)%>%
+  summarise(combinations=n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  filter(class%in%c("EP","EN"))%>%
+  group_by(DAT)%>%
+  summarise(combinations=n())
+
+```
+
+```{r CombNrsUpstreamAssay_Unique, fig.width = 5, fig.height = 5}
+# NR of unique EP combinations
+
+all_comball%>%filter(class=="EP")%>%
+  #group_by(DAT)%>%
+      distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  filter(class%in%c("EP","EN"))%>%
+  group_by(DAT)%>%
+  distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+```
+
+
+```{r CombNrsUpstreamAssay_plot, fig.width = 5, fig.height = 5}
+# To be updated
+
+all_comball%>%
+  filter(class!="ee")%>%
+  group_by(class)%>%
+  summarise(combinations=n())%>%
+  ggplot(aes(class, combinations, fill=class))+
+  geom_bar(stat = "identity")+
+  theme_bw()+
+  scale_y_continuous(limits = c(0, 70000), n.breaks = 6, minor_breaks = waiver())
+
+```
+
+```{r CombNrsUpstreamAssay_plotperlib, fig.width = 4, fig.height = 5}
+# To be updated
+NRCombsDownstream<-tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  filter(class%in%c("EP","EN"))%>%
+  group_by(DAT)%>%
+  summarise(combinations=n())
+
+all_comball%>%
+  filter(class=="EP")%>%
+  group_by(DAT)%>%
+  summarise(combinations=n())%>%
+  bind_rows(NRCombsDownstream)%>%
+  ggplot(aes(DAT, combinations, fill=DAT))+
+  geom_bar(stat = "identity")+
+  theme_bw()+
+  xlab("library")+
+  ylab("Nr of EP combinations")
+  #scale_y_continuous(limits = c(0, 70000), n.breaks = 6, minor_breaks = waiver())
+
+```
+```{r CombNrsUpstreamAssay_plotuniqe, fig.width = 4, fig.height = 5}
+# To be updated
+NRUniqueCombsDownstream<-tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(DAT="Downstream")%>%
+  filter(class%in%c("EP","EN"))%>%
+  group_by(DAT)%>%
+  distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+all_comball%>%
+  filter(class=="EP")%>%
+  group_by(DAT)%>%
+    distinct(frag1,frag2)%>%
+  summarise(combinations=n())%>%
+  bind_rows(NRUniqueCombsDownstream)%>%
+  ggplot(aes(DAT, combinations, fill=DAT))+
+  geom_bar(stat = "identity")+
+  theme_bw()+
+      theme(legend.position = "none")+
+  xlab("library")+
+  ylab("Nr of EP combinations")
+  #scale_y_continuous(limits = c(0, 70000), n.breaks = 6, minor_breaks = waiver())
+
+all_comball%>%
+  filter(class=="EP")%>%
+  #group_by(DAT)%>%
+    distinct(frag1,frag2)%>%
+  summarise(combinations=n())
+
+all_comball%>%
+  filter(class=="EP")%>%
+  group_by(frag1,id2)%>%filter(strand2=="+")%>%
+  summarise(combinations=n())
+
+```
+
+```{r Boost index distributions, fig.width = 4, fig.height = 5}
+
+
+all_comball%>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1))%>%
+ # mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  #filter(BoostPerPmed!=(-Inf))%>%
+  #filter(BoostPerPmed!=(+Inf))%>%
+  group_by(id2,id1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed),activity_all_frag2=mean(activity_all_frag2),activity_all_frag1=mean(activity_all_frag1),class=unique(class))%>%
+  mutate(DAT="Upstream")%>%
+  bind_rows(tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class%in%c("EP","EN"))%>%group_by(id2,frag1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed))%>% mutate(DAT="Downstream"))%>%
+  ggplot(aes(DAT, BoostPerPmed))+
+  geom_quasirandom(size=0.1, alpha=0.5)+
+  theme_bw()+
+    theme(legend.position = "none")+
+  xlab("Assay")+
+  ylab("Boost index (log2)")+
+  geom_boxplot(width=0.2)+
+    labs(caption="cCRE-P+; Downstream (n=828); Upstream (n=3,041)")
+  #scale_y_continuous(limits = c(0, 70000), n.breaks = 6, minor_breaks = waiver())
+
+all_comball%>%
+  filter(class=="EP")%>%
+  filter(activity_all_frag2>1)%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1))%>%
+ # mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  group_by(id2,id1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed),activity_all_frag2=mean(activity_all_frag2),activity_all_frag1=mean(activity_all_frag1),class=unique(class))%>%
+  mutate(DAT="Upstream")%>%
+  bind_rows(tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class%in%c("EP","EN"))%>%group_by(id2,frag1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed))%>% mutate(DAT="Downstream"))%>%
+  ggplot(aes(DAT, BoostPerPmed, fill=DAT))+
+  geom_quasirandom(size=0.1, alpha=0.5)+
+  theme_bw()+
+    theme(legend.position = "none")+
+  xlab("Assay")+
+  ylab("Boost index (log2)")+
+  geom_boxplot(width=0.2)+
+  ggtitle("High activity promoters")
+  #scale_y_continuous(limits = c(0, 70000), n.breaks = 6, minor_breaks = waiver())
+
+```
+
+# Overlap between upstream and downstream
+
+```{r OverlapUPDOWN, fig.width = 5, fig.height = 5}
+
+# Overlap of combinations
+all_comball%>%filter(class=="EP")%>%
+  filter(DAT=="klf2")%>%
+  #group_by(DAT)%>%
+      #distinct(frag1,frag2)%>%
+  filter(id%in%tib_Split_NCS_avgSPLIT_V2Adj_all$id)%>%
+  summarise(combinations=n())
+
+#Overlap of unique combinations
+all_comball%>%filter(class=="EP")%>%
+  filter(DAT=="klf2")%>%
+  #group_by(DAT)%>%
+      distinct(frag1,frag2)%>%
+  filter(frag1%in%tib_Split_NCS_avgSPLIT_V2Adj_all$frag1 & frag2%in%tib_Split_NCS_avgSPLIT_V2Adj_all$frag2)%>%
+  summarise(combinations=n())
+
+```
+
+
+# Reproducibility
+
+```{r reproducibilityReps, fig.height=5, fig.width=5}
+
+# Reproducibility between all pairs in the 3 reps Raw
+all_comball%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18 )
+
+# Reproducibility between all pairs in the 3 reps Log transformed
+all_comball%>%
+    mutate(activity_br1=log2(activity_br1))%>%
+  mutate(activity_br2=log2(activity_br2))%>%
+  mutate(activity_br3=log2(activity_br3))%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18 )
+
+# Reproducibility between all pairs in the 3 reps Log transformed Klf2
+all_comball%>%
+    filter(DAT=="klf2")%>%
+    mutate(activity_br1=log2(activity_br1))%>%
+  mutate(activity_br2=log2(activity_br2))%>%
+  mutate(activity_br3=log2(activity_br3))%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18 )
+
+# Reproducibility between all pairs in the 3 reps Log transformed Tfcp2l1
+all_comball%>%
+  filter(DAT=="Tfcp2l1")%>%
+    mutate(activity_br1=log2(activity_br1))%>%
+  mutate(activity_br2=log2(activity_br2))%>%
+  mutate(activity_br3=log2(activity_br3))%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18 )
+
+# avg corr
+(0.867+0.897+0.831)/3
+```
+
+```{r reproducibilityReps_Downstream, fig.height=5, fig.width=5}
+
+# Reproducibility between all pairs in the 3 reps Raw
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18 )
+
+# Reproducibility between all pairs in the 3 reps Log transformed
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+    mutate(activity_br1=log2(activity_br1))%>%
+  mutate(activity_br2=log2(activity_br2))%>%
+  mutate(activity_br3=log2(activity_br3))%>%
+  filter(!activity_br3%in%c(NA,Inf,-Inf))%>%
+    filter(!activity_br2%in%c(NA,Inf,-Inf))%>%
+  filter(!activity_br1%in%c(NA,Inf,-Inf))%>%
+ ggpairs(columns =16:18 )
+
+# avg corr
+(0.978+0.978+0.989)/3
+```
+
+# Klf2 data range and per promoter and boost scaling
+```{r}
+load('~/mydata/GitHub/EPCombinations/data/MMA20201010_epsure_tibs_tfcp2l1_V3_V4.RData')
+load('~/mydata/GitHub/EPCombinations/data/MMA20200804_NCKlf2Nanog_EPSuRE_v3_B3_v4.RData')
+```
+
+```{r}
+#Get baseline empty vectors activity and sd
+bind_rows(tib_comb_klf2_processed_v4B3,tib_comb_nanog_processed_v4B3)%>%
+  filter(id=="eempty*eempty*")%>%
+  pivot_longer(cols = 6:8, names_to = "activities")%>%
+  summarise(mean(activity_all), sd(value), sd(log2(value)))
+```
+
+
+
+```{r SingletsActivities, fig.height=5, fig.width=8}
+
+
+
+# obtain nrs singlets
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(frag2,DAT,class2)%>%
+  filter(class2!="e")%>%
+  group_by(DAT,class2)%>%
+  summarise(n())
+
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(id2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+  ggplot(aes(class2,log2(activity_all_frag2)))+
+  facet_wrap(~DAT)+
+  #geom_boxplot(aes(color=class2))+
+  geom_quasirandom(size=0.5, aes(color=class2))+
+  theme_bw()+
+  geom_hline(yintercept=log2(0.1372709), alpha=0.5)+
+  xlab("Singlets")+
+  ylab("Activity Singlets (log2)")+
+  labs(caption="Klf2 (E=84,P=23) ; Nanog (E=104, P=18); Tfcp2l1  (E=230, P=25) ")
+```
+```{r SingletsActivitiesKl2, fig.height=5, fig.width=3}
+
+
+
+
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(id2,DAT,activity_all_frag2,class2)%>%
+  filter(DAT=="klf2")%>%
+  filter(class2!="e")%>%
+  ggplot(aes(class2,log2(activity_all_frag2)))+
+  #facet_wrap(~DAT)+
+  #geom_boxplot(aes(color=class2))+
+  geom_quasirandom(size=0.5, aes(color=class2))+
+  # stat_summary(fun.y = median, fun.ymin = median, fun.ymax = median,
+  #               geom = "crossbar", width = 0.4 )+
+  theme_bw()+
+  geom_hline(yintercept=log2(0.1372709), alpha=1)+
+  geom_hline(yintercept=log2(0.1372709)-0.7466535, alpha=0.5)+
+    geom_hline(yintercept=log2(0.1372709)+0.7466535, alpha=0.5)+
+  xlab("Singlets")+
+  ylab("Activity Singlets (log2)")+
+  labs(caption="Klf2 (E=84,P=23)")
+```
+
+
+```{r SingletsActivitiesAll, fig.height=5, fig.width=5}
+
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(id2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+  ggplot(aes(class2,log2(activity_all_frag2)))+
+  geom_boxplot(aes(color=class2))+
+  theme_bw()+
+  geom_hline(yintercept=log2(0.1372709), alpha=0.5)+
+  xlab("Singlets")+
+  ylab("Activity Singlets (log2)")+
+  labs(caption="Klf2 (E=84,P=23) ; Nanog (E=104, P=18); Tfcp2l1  (E=230, P=25) ")
+```
+
+```{r}
+#threshold
+log2(0.1372709	+2*(0.07705512))
+
+log2(0.1372709	+2*(0.07705512))
+
+# % of active elements, 2sd higher than empty vectors.
+
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(id2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+  filter(activity_all_frag2!=c(NA, Inf,-Inf))%>%
+  mutate(active=ifelse(activity_all_frag2>0.1372709	+2*(0.07705512), TRUE, FALSE))%>%
+  group_by(class2)%>%
+  summarise(active=sum(active),n=n(), PercAct= 100*sum(active)/n())
+
+# % of active elements, 2sd higher than empty vectors.
+
+all_comball%>%
+  filter(!DAT=="Tfcp2l1")%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(id2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+  filter(activity_all_frag2!=c(NA, Inf,-Inf))%>%
+  mutate(active=ifelse(log2(activity_all_frag2)>log2(0.1372709)+0.7466535, TRUE, FALSE))%>%
+  group_by(class2)%>%
+  summarise(active=sum(active),n=dplyr::n(), PercAct= 100*sum(active)/dplyr::n())
+
+all_comball%>%
+  filter(DAT=="Tfcp2l1")%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(id2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+  filter(activity_all_frag2!=c(NA, Inf,-Inf))%>%
+  mutate(active=ifelse(log2(activity_all_frag2)>log2(0.05823942)+ 2*0.2960308, TRUE, FALSE))%>%
+  group_by(class2)%>%
+  summarise(active=sum(active),n=dplyr::n(), PercAct= 100*sum(active)/dplyr::n())
+
+(55+150)/(237+270)
+
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(id2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+  filter(activity_all_frag2!=c(NA, Inf,-Inf))%>%
+  mutate(active=ifelse(activity_all_frag2>0.1372709	+2*(0.07705512), TRUE, FALSE))%>%
+  group_by(class2)%>%
+  summarise(active=sum(active),n=n(), PercAct= 100*sum(active)/n())%>%
+  ggplot(aes(class2,PercAct, fill=class2))+
+  geom_bar(stat = "identity")+
+  ylim(c(0,100))+
+  xlab("Singlets")+
+  ylab("% Activity > background")
+
+```
+```{r}
+#threshold
+log2(0.1372709	+2*(0.07705512))
+
+# % of active elements, 2sd higher than empty vectors.
+
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(frag2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+  filter(activity_all_frag2!=c(NA, Inf,-Inf))%>%
+  group_by(frag2, DAT)%>%
+  summarise(activity_all_frag2=mean(activity_all_frag2), class2=unique(class2))%>%
+  mutate(active=ifelse(activity_all_frag2>0.1372709	+2*(0.07705512), TRUE, FALSE))%>%
+  group_by(class2)%>%
+  summarise(active=sum(active),n=n(), PercAct= 100*sum(active)/n())
+
+all_comball%>%
+  mutate(class2=substring(class,2,2))%>%
+  distinct(frag2,DAT,activity_all_frag2,class2)%>%
+  filter(class2!="e")%>%
+   filter(activity_all_frag2!=c(NA, Inf,-Inf))%>%
+  group_by(frag2, DAT)%>%
+  summarise(activity_all_frag2=mean(activity_all_frag2), class2=unique(class2))%>%
+  mutate(active=ifelse(activity_all_frag2>0.1372709	+2*(0.07705512), TRUE, FALSE))%>%
+  group_by(class2)%>%
+  summarise(active=sum(active),n=n(), PercAct= 100*sum(active)/n())%>%
+  ggplot(aes(class2,PercAct, fill=class2))+
+  geom_bar(stat = "identity")+
+  ylim(c(0,100))+
+  xlab("Singlets")+
+  ylab("% Activity > background")
+
+```
+
+#	Klf2 boosting matrix.
+
+```{r ploot matrix function, include=FALSE}
+
+#Function to plot the Boosting index Matrix 
+plot_coop_heatmap_simple <- function(tib, classs = 'all' , skip_n_lab = 1) {
+
+  # validate args
+  if(!classs %in% c('all', 'EE', 'EP', 'PE', 'PP', 'EN', 'PN', 'NP', 'NN'))
+    stop('Undefined class type. Please use one of EE, EP, PE or PP, or leave default for all pairs')
+
+  if(classs != 'all') {
+    # note: tib %>% filter(class == get('class')) fails
+    # see https://stackoverflow.com/questions/40169949/filter-dataframe-using-global-variable-with-the-same-name-as-column-name
+
+    tib     <- tib %>% filter(class %in% class)
+  }
+
+  # set color palette
+  pal <- c('navyblue', 'gray95', 'orangered')
+
+  # static viz
+
+
+      # compute coop index range
+      y_min <- min(tib[['boost']], na.rm = TRUE)
+      y_max <- max(tib[['boost']], na.rm = TRUE)
+
+      # coop index heatmap (additive)
+      p_main <- tib %>%
+        ggplot(aes(x = id1, y = id2)) +
+        geom_tile(fill = 'gray40') +
+        #        geom_tile(color = 'gray20', alpha = 0, size = 0.5) + ## prev version with stroke
+        #        geom_tile(fill = rgb(53/255, 143/255, 168/255, 0.1)) + ## prev version with color outside coop idx palette
+        geom_raster(data = tib, aes(x = id1, y = id2, fill = boost))
+        
+
+    
+
+
+    # marginal barplots
+      
+      tib_p_top <- tib %>%
+      dplyr::select(id1, activity_all_frag1) %>%
+                group_by(id1)%>%
+        summarise(activity_all_frag1=mean(activity_all_frag1))%>%
+      distinct() %>%
+      mutate(activity_orig = log2(activity_all_frag1),
+             shift    = min(activity_orig[!is.infinite(activity_orig)], na.rm = TRUE),
+             activity = activity_orig-shift, 
+             empty_activity= log2(0.1372709)-shift)
+      
+    p_top <- tib_p_top %>%
+      ggplot(aes(id1, activity)) +
+      geom_bar(stat = 'identity') +
+      ylim(c(-5,5))+
+      geom_hline(yintercept = tib_p_top$empty_activity[1])+
+      scale_y_continuous(breaks = c(min(tib_p_top[['activity']][!is.infinite(tib_p_top[['activity']])]),
+                                    max(tib_p_top[['activity']])),
+                         labels = c(signif(min(tib_p_top[['activity_orig']][!is.infinite(tib_p_top[['activity_orig']])]), 2),
+                                    signif(max(tib_p_top[['activity_orig']]), 2)))
+
+    tib_p_right <- tib %>%
+      dplyr::select(id2, activity_all_frag2) %>%
+      distinct() %>%
+      mutate(activity_orig = log2(activity_all_frag2),
+             shift    = min(activity_orig[!is.infinite(activity_orig)], na.rm = TRUE),
+             activity = activity_orig-shift,
+             empty_activity=log2(0.1372709)-shift)
+
+    p_right <- tib_p_right %>%
+      ggplot(aes(id2, activity)) +
+      geom_bar(stat = 'identity') +
+      ylim(c(-5,5))+
+      geom_hline(yintercept = tib_p_right$empty_activity[1])+
+      scale_y_continuous(breaks = c(min(tib_p_right[['activity']][!is.infinite(tib_p_right[['activity']])]),
+                                    max(tib_p_right[['activity']])),
+                         labels = c(signif(min(tib_p_right[['activity_orig']][!is.infinite(tib_p_right[['activity_orig']])]), 2),
+                                    signif(max(tib_p_right[['activity_orig']]), 2))) +
+      coord_flip()
+
+    # cosmetics
+    p_main <- p_main +
+      scale_fill_gradientn(colors = pal,
+                           values = rescale(c(y_min, 0, y_max))) +
+      labs(x = 'Enhancers', y = 'Promoters', fill = 'Boosting Index', caption = paste0('(n = ', nrow(tib), ' pairs)')) +
+      theme(axis.text.x      = element_text(angle = 90, color =  c('black', rep('transparent', skip_n_lab))),
+            axis.text.y      = element_text(color =  c('black', rep('transparent', skip_n_lab))),
+            panel.grid       = element_blank(),
+            panel.background = element_rect(fill = "white"),
+            legend.position  = 'bottom',
+            text             = element_text(size = 13),)
+
+    p_top <- p_top +
+      labs(x = NULL,  y = 'Basal Activity (log2)') +
+      theme_bw() +
+      theme(axis.line.x  = element_line(size = 0, colour = "white"),
+            axis.ticks.x = element_line(size = 0),
+            axis.text.x  = element_blank(),
+            panel.border = element_blank(),
+            panel.grid   = element_blank(),
+            text         = element_text(size = 13))
+    
+    p_right <- p_right +
+      labs(x = NULL,  y = 'Basal Activity (log2)') +
+      theme_bw() +
+      theme(axis.line.y  = element_line(size = 0, colour = "white"),
+            axis.ticks.y = element_line(size = 0),
+            axis.text.y  = element_blank(),
+            panel.border = element_blank(),
+            panel.grid   = element_blank(),
+            text         = element_text(size = 13))
+
+    p_empty <- ggplot(mtcars, aes(wt, mpg)) +
+      theme(line             = element_blank(),
+            text             = element_blank(),
+            title            = element_blank(),
+            panel.background = element_rect(fill = NA, size = 0), plot.background = element_rect(size = 0))
+    egg::ggarrange(p_top,
+                   p_empty,
+                   p_main,
+                   p_right,
+                   nrow = 2,
+                   ncol = 2,
+                   widths = c(3, 1),
+                   heights = c(1, 3))
+
+
+
+}
+```
+
+
+```{r EPmatrixKlf2_avg_orientations , fig.height=8, fig.width=15}
+allKlfcombNCAdj_all%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1))%>%
+  mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  filter(class=="EP")%>%
+  group_by(id2,id1)%>%
+  summarise(boost=mean(boost),activity_all_frag2=mean(activity_all_frag2),activity_all_frag1=mean(activity_all_frag1),class=unique(class))%>%
+  filter(!log2(activity_all_frag2)%in%c(-Inf, Inf))%>%
+  filter(!log2(activity_all_frag1)%in%c(-Inf, Inf))%>%
+  ungroup()%>%
+plot_coop_heatmap_simple( class = c('EP'), skip_n_lab = 0)
+```
+
+# Downstream matrix
+
+```{r ploot matrix function 2, include=FALSE}
+
+#Function to plot the Boosting index Matrix 
+plot_coop_heatmap_simpleDownstream <- function(tib, classs = 'all' , skip_n_lab = 1) {
+
+  # validate args
+  if(!classs %in% c('all', 'EE', 'EP', 'PE', 'PP', 'EN', 'PN', 'NP', 'NN'))
+    stop('Undefined class type. Please use one of EE, EP, PE or PP, or leave default for all pairs')
+
+  if(classs != 'all') {
+    # note: tib %>% filter(class == get('class')) fails
+    # see https://stackoverflow.com/questions/40169949/filter-dataframe-using-global-variable-with-the-same-name-as-column-name
+
+    tib     <- tib %>% filter(class %in% class)
+  }
+
+  # set color palette
+  pal <- c('navyblue', 'gray95', 'orangered')
+
+  # static viz
+
+
+      # compute coop index range
+      y_min <- min(tib[['boost']], na.rm = TRUE)
+      y_max <- max(tib[['boost']], na.rm = TRUE)
+
+      # coop index heatmap (additive)
+      p_main <- tib %>%
+        ggplot(aes(x = id1, y = id2)) +
+        geom_tile(fill = 'gray40') +
+        #        geom_tile(color = 'gray20', alpha = 0, size = 0.5) + ## prev version with stroke
+        #        geom_tile(fill = rgb(53/255, 143/255, 168/255, 0.1)) + ## prev version with color outside coop idx palette
+        geom_raster(data = tib, aes(x = id1, y = id2, fill = boost))
+
+    
+
+
+    # marginal barplots
+      
+      tib_p_top <- tib %>%
+      dplyr::select(id1, activity_all_frag1) %>%
+                group_by(id1)%>%
+        summarise(activity_all_frag1=mean(activity_all_frag1))%>%
+      distinct() %>%
+      mutate(activity_orig = log2(activity_all_frag1),
+             shift    = min(activity_orig[!is.infinite(activity_orig)], na.rm = TRUE),
+             activity = activity_orig-shift, 
+             empty_activity= log2(0.1372709)-shift)
+      
+    p_top <- tib_p_top %>%
+      ggplot(aes(id1, activity)) +
+      geom_bar(stat = 'identity') +
+      ylim(c(-5,5))+
+      geom_hline(yintercept = tib_p_top$empty_activity[1])+
+      scale_y_continuous(breaks = c(min(tib_p_top[['activity']][!is.infinite(tib_p_top[['activity']])]),
+                                    max(tib_p_top[['activity']])),
+                         labels = c(signif(min(tib_p_top[['activity_orig']][!is.infinite(tib_p_top[['activity_orig']])]), 2),
+                                    signif(max(tib_p_top[['activity_orig']]), 2)))
+
+    tib_p_right <- tib %>%
+      dplyr::select(id2, activity_all_frag2) %>%
+      distinct() %>%
+      mutate(activity_orig = log2(activity_all_frag2),
+             #shift    = min(activity_orig[!is.infinite(activity_orig)], na.rm = TRUE),
+             shift    = log2(0.10),
+             activity = activity_orig-shift,
+             empty_activity=log2(0.1453645)-shift)
+
+    p_right <- tib_p_right %>%
+      ggplot(aes(id2, activity)) +
+      geom_bar(stat = 'identity') +
+      ylim(c(-5,5))+
+      geom_hline(yintercept = tib_p_right$empty_activity[1])+
+      scale_y_continuous(breaks = c(0,
+                                    max(tib_p_right[['activity']])),
+                         labels = c(round(log2(0.10), digits = 1),
+                                    signif(max(tib_p_right[['activity_orig']]), 2))) +
+      coord_flip()
+
+    # cosmetics
+    p_main <- p_main +
+      scale_fill_gradientn(colors = pal,
+                           values = rescale(c(y_min, 0, y_max))) +
+      labs(x = 'Enhancers', y = 'Promoters', fill = 'Boosting Index', caption = paste0('(n = ', nrow(tib), ' pairs)')) +
+      theme(axis.text.x      = element_text(angle = 90, color =  c('black', rep('transparent', skip_n_lab))),
+            axis.text.y      = element_text(color =  c('black', rep('transparent', skip_n_lab))),
+            panel.grid       = element_blank(),
+            panel.background = element_rect(fill = "white"),
+            legend.position  = 'bottom',
+            text             = element_text(size = 13),)
+
+    p_top <- p_top +
+      labs(x = NULL,  y = 'Basal Activity (log2)') +
+      theme_bw() +
+      theme(axis.line.x  = element_line(size = 0, colour = "white"),
+            axis.ticks.x = element_line(size = 0),
+            axis.text.x  = element_blank(),
+            panel.border = element_blank(),
+            panel.grid   = element_blank(),
+            text         = element_text(size = 13))
+    
+    p_right <- p_right +
+      labs(x = NULL,  y = 'Basal Activity (log2)') +
+      theme_bw() +
+      theme(axis.line.y  = element_line(size = 0, colour = "white"),
+            axis.ticks.y = element_line(size = 0),
+            axis.text.y  = element_blank(),
+            panel.border = element_blank(),
+            panel.grid   = element_blank(),
+            text         = element_text(size = 13))
+
+    p_empty <- ggplot(mtcars, aes(wt, mpg)) +
+      theme(line             = element_blank(),
+            text             = element_blank(),
+            title            = element_blank(),
+            panel.background = element_rect(fill = NA, size = 0), plot.background = element_rect(size = 0))
+    egg::ggarrange(p_top,
+                   p_empty,
+                   p_main,
+                   p_right,
+                   nrow = 2,
+                   ncol = 2,
+                   widths = c(3, 1),
+                   heights = c(1, 3))
+
+
+
+}
+```
+
+
+```{r EPmatrixKlf2_avg_orientations_Downstream , fig.height=8, fig.width=15}
+
+
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+  left_join(allKlfcombNCAdj_all%>%ungroup()%>%
+              mutate(id1=paste0(frag1,strand1))%>%
+              dplyr::select(id1,activity_all_frag1)%>%
+              distinct(id1,activity_all_frag1), 
+            by="id1")%>%
+    mutate(id1=paste0(frag1))%>%
+  mutate(id2=paste0(frag2))%>%
+  mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  filter(boost!=(-Inf))%>%
+  filter(boost!=(+Inf))%>%
+  filter(class%in%c("EP", "EN"))%>%
+  group_by(id2,id1)%>%
+  summarise(boost=mean(boost),activity_all_frag2=mean(activity_frag2_all),activity_all_frag1=mean(activity_all_frag1),class=unique(class))%>%
+  filter(log2(activity_all_frag2)!=(-Inf))%>%
+  filter(log2(activity_all_frag1)!=(-Inf))%>%
+  ungroup()%>%
+plot_coop_heatmap_simpleDownstream( class = c('EP', 'EN'), skip_n_lab = 0)
+```
+
+
+# Barplot examples
+
+```{r Barplots_examples , fig.height=7, fig.width=12}
+AveragedboostNCKLf2<-allKlfcombNCAdj_all%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+    mutate(id1=paste0(frag1))%>%
+  #mutate(boost=BoostPerPmed)%>%
+  filter(strand2=="+")%>%
+  filter(BoostPerPmed!=(-Inf))%>%
+  filter(BoostPerPmed!=(+Inf))%>%
+  filter(class=="EP")%>%
+  group_by(id2,id1)%>%
+  summarise(BoostPerPmed=mean(BoostPerPmed),activity_all_frag2=mean(activity_all_frag2),activity_all_frag1=mean(activity_all_frag1),class=unique(class), activity_br1=mean(activity_br1),activity_br2=mean(activity_br2), activity_br3=mean(activity_br3), Basal_median=mean(Basal_median), activity_all=mean(activity_all))%>%
+  filter(log2(activity_all_frag2)!=(-Inf))%>%
+  filter(log2(activity_all_frag1)!=(-Inf))%>%
+  ungroup()
+ # compute boost index range
+  palBars <- c('navyblue', 'gray95', 'orangered')
+      y_minboost <- min(AveragedboostNCKLf2[['BoostPerPmed']], na.rm = TRUE)
+      y_maxboost <- max(AveragedboostNCKLf2[['BoostPerPmed']], na.rm = TRUE)
+      
+AveragedboostNCKLf2%>%
+  filter(id1%in%c("E046", "E097", "E070", "E030"))%>%
+  mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   rowwise() %>%
+  mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+ggplot(aes(id2, BoostPerPmed, fill=BoostPerPmed))+
+geom_bar(stat="identity")+
+  #geom_errorbar(aes(ymin=BoostPerPmed-sdboost, ymax=BoostPerPmed+sdboost), width=.2,
+                # position=position_dodge(.9))+
+    theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  scale_fill_gradientn(colors = palBars, values = rescale(c(y_minboost, 0, y_maxboost))) +
+  #scale_fill_gradient2( low = 'navyblue',mid = "white",high = 'orangered',midpoint = 0)+
+  facet_wrap(~id1)+
+  ggtitle("Examples Klf2 locus")
+
+```
+
+
+
+```{r Barplots_examplesErrorBArs , fig.height=7, fig.width=12}
+      
+AveragedboostNCKLf2%>%
+  filter(id1%in%c("E046", "E097", "E070", "E030"))%>%
+  #=filter(!id2%in%c("P012+","P024+" ))%>%
+  mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   rowwise() %>%
+  mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+ggplot(aes(id2, BoostPerPmed, fill=BoostPerPmed))+
+geom_bar(stat="identity")+
+  geom_errorbar(aes(ymin=BoostPerPmed-sdboost, ymax=BoostPerPmed+sdboost), width=.2,
+                 position=position_dodge(.9))+
+    theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  scale_fill_gradientn(colors = palBars, values = rescale(c(-1.92, 0, 4.91)), limits = c(-1.92,4.91) ) +
+  #scale_fill_gradient2( low = 'navyblue',mid = "white",high = 'orangered',midpoint = 0)+
+  facet_wrap(~id1)+
+  ggtitle("Examples Klf2 locus")
+
+AveragedboostNCKLf2%>%
+  filter(id1%in%c("E046", "E097", "E070", "E030"))%>%
+  #filter(!id2%in%c("P012+","P024+" ))%>%
+  mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   rowwise() %>%
+  mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+ggplot(aes(id2, BoostPerPmed, fill=BoostPerPmed))+
+geom_bar(stat="identity")+
+  geom_errorbar(aes(ymin=BoostPerPmed-sdboost, ymax=BoostPerPmed+sdboost), width=.2,
+                 position=position_dodge(.9))+
+    theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  scale_fill_gradientn(colors = palBars, values = rescale(c(-1.92, 0, 4.91)), limits = c(-1.92,4.91) ) +
+  #scale_fill_gradient2( low = 'navyblue',mid = "white",high = 'orangered',midpoint = 0)+
+  facet_wrap(~id1)+
+  ggtitle("Examples Klf2 locus")+
+  ylim(-4,3)
+
+y_minact <- min(AveragedboostNCKLf2[['activity_all']], na.rm = TRUE)
+      y_maxact <- max(AveragedboostNCKLf2[['activity_all']], na.rm = TRUE)
+
+
+
+AveragedboostNCKLf2%>%
+    filter(activity_all>0.17)%>%
+  filter(id1%in%c("E046", "E097", "E070", "E030"))%>%
+  #filter(!id2%in%c("P012+","P024+" ))%>%
+  mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   rowwise() %>%
+  mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+ggplot(aes(id2, BoostPerPmed, fill=BoostPerPmed))+
+geom_bar(stat="identity")+
+  geom_errorbar(aes(ymin=BoostPerPmed-sdboost, ymax=BoostPerPmed+sdboost), width=.2,
+                 position=position_dodge(.9))+
+    theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  scale_fill_gradientn(colors = palBars, values = rescale(c(-1.92, 0, 4.91)), limits = c(-1.92,4.91) ) +
+  #scale_fill_gradient2( low = 'navyblue',mid = "white",high = 'orangered',midpoint = 0)+
+  facet_wrap(~id1)+
+  ggtitle("Examples Klf2 locus filter high sd")
+
+
+```
+
+```{r Barplots_examples_UpstreamCompDown , fig.height=7, fig.width=12}
+AveragedboostNCKLf2%>%
+    filter(activity_all_frag2>0.5)%>%
+  filter(id1%in%c("E046", "E097", "E070", "E030"))%>%
+  #filter(!id2%in%c("P012+","P024+" ))%>%
+  mutate(BoostPerPmed1=log2(activity_br1/Basal_median))%>%
+  mutate(BoostPerPmed2=log2(activity_br2/Basal_median))%>%
+  mutate(BoostPerPmed3=log2(activity_br3/Basal_median))%>%
+   rowwise() %>%
+  mutate(sdboost=var(c(BoostPerPmed1, BoostPerPmed2, BoostPerPmed3)))%>%
+ggplot(aes(id2, BoostPerPmed, fill=BoostPerPmed))+
+geom_bar(stat="identity")+
+  geom_errorbar(aes(ymin=BoostPerPmed-sdboost, ymax=BoostPerPmed+sdboost), width=.2,
+                 position=position_dodge(.9))+
+    theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  xlab("Promoter")+
+  ylab("Boost index (log2)")+
+  scale_fill_gradientn(colors = palBars, values = rescale(c(-1.92, 0, 4.91)), limits = c(-1.92,4.91) ) +
+  #scale_fill_gradient2( low = 'navyblue',mid = "white",high = 'orangered',midpoint = 0)+
+  facet_wrap(~id1)+
+  ggtitle("Examples Klf2 locus filter high sd")
+
+```
+
+
+
+## Sd vs Activity
+
+```{r SDvsActivityAll, fig.height=7, fig.width=7}
+all_comball%>%
+  filter(class=="EP")%>%
+  rowwise()%>%
+  group_by(id, DAT)%>%
+  mutate(StDev=sd(c(activity_br1,activity_br2,activity_br3)))%>%
+  ggplot(aes(log2(activity_all), log2(StDev)))+
+  geom_point(size=0.1, alpha=0.5)+
+  #facet_wrap(class~DAT)+
+  geom_abline(slope = 1)+
+  geom_density_2d()+
+  theme_bw()
+
+all_comball%>%
+    filter(class=="EP")%>%
+  rowwise()%>%
+  group_by(id, DAT)%>%
+  mutate(StDev=sd(c(activity_br1,activity_br2,activity_br3)))%>%
+  ggplot(aes(log2(activity_all), log2(StDev/activity_all)))+
+  geom_point(size=0.5, alpha=0.5)+
+  #facet_wrap(class~DAT)+
+  geom_hline(yintercept = 0)+
+    geom_hline(yintercept = -2, alpha=0.5)+
+  #geom_density_2d()+
+  theme_bw()
+```
+
+```{r SDvsActivity, fig.height=20, fig.width=15}
+all_comball%>%
+  rowwise()%>%
+  group_by(id, DAT)%>%
+  mutate(StDev=sd(c(activity_br1,activity_br2,activity_br3)))%>%
+  ggplot(aes(log2(activity_all), log2(StDev)))+
+  geom_point(size=0.1, alpha=0.5)+
+  facet_wrap(class~DAT)+
+  geom_abline(slope = 1)+
+  geom_density_2d()+
+  theme_bw()
+
+all_comball%>%
+  rowwise()%>%
+  group_by(id, DAT)%>%
+  mutate(StDev=sd(c(activity_br1,activity_br2,activity_br3)))%>%
+  ggplot(aes(log2(activity_all), log2(StDev/activity_all)))+
+  geom_point(size=0.1, alpha=0.5)+
+  facet_wrap(class~DAT)+
+  geom_hline(yintercept = 0)+
+    geom_hline(yintercept = -2, alpha=0.5)+
+  geom_density_2d()+
+  theme_bw()
+```

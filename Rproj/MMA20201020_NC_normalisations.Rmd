@@ -1,0 +1,549 @@
+---
+title: "NC_normalisations_MMA20201020"
+author: "MMA"
+date: "20/10/2020"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE, 
+                      message    = FALSE, 
+                      warning    = FALSE, 
+                      cache      = TRUE,
+                      autodep    = TRUE,
+                      fig.align  = 'center', 
+                      fig.width  = 6, 
+                      fig.height = 6)
+```
+
+```{r libs and fun}
+library(tidyverse)
+library(here)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(gridExtra)
+library(pander)
+library(cowplot)
+library(circlize)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+library(heatmaply)
+library(scales)
+
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering visualization
+library(dendextend) # for comparing two dendrograms
+
+```
+# Intro
+Aim: explore which is the best use of Negative controls for normalisations. In both assays.
+
+Options:
+1. Normalise to global effect of Negative controls.
+2. Normalise to per Promoter effect of Negative controls. (only possible for Downstream assay)
+3. Normalise to Global effect of Enhancers.
+4. Normalise to per Promoter effect of Enhancers.
+
+# Load data
+
+```{r}
+# Load processed data for upstream and downstream Klf2 and Nanog
+load("~/mydata/GitHub/EPCombinations/data//MMA20200929_Split_NCS_tibs_avg_V2.RData")
+load('~/mydata/GitHub/EPCombinations/data/MMA20200804_NCKlf2Nanog_EPSuRE_v3_B3_v4.RData')
+```
+
+
+```{r}
+allKlfcombNCSups<-bind_rows(tib_comb_NCklf2_processed_v4B3, tib_comb_klf2_processed_v4B3)
+#NCS_joinedAssays<-inner_join(tib_Split_NCS_avgSPLIT_V2,allKlfcombNCSups, by="id")
+```
+#Adjust boosting indexes
+## Upstream
+```{r}
+#Correct classes from Downstream assay
+allKlfcombNCSupsClass<-allKlfcombNCSups%>%
+  mutate(class1= ifelse(substring(frag1, 1, 1)=="P", "P", ifelse(frag1=="eempty", "e",ifelse(grepl("shuffled", frag1)|substring(frag1, 1, 1)=="R", "N", "E"))))%>%
+  mutate(class2= ifelse(substring(frag2, 1, 1)=="P", "P", ifelse(frag1=="eempty", "e",ifelse(grepl("shuffled", frag2)|substring(frag2, 1, 1)=="R", "N", "E"))))%>%
+  mutate(class=paste0(class1,class2))
+
+```
+```{r}
+#calculate general NP boost deviation 
+allKlfcombNCSupsClass%>%
+  filter(!boost_all%in%c(Inf,-Inf, NA))%>%
+  group_by(class)%>%
+  summarise(median(boost_all), mean(boost_all))
+
+
+allKlfcombNCSupsClass%>%
+  filter(!boost_all%in%c(Inf,-Inf, NA))%>%
+  filter(class=="NP")%>%
+  group_by(frag2)%>%
+  summarise(median(boost_all), mean(boost_all), n())
+
+#adjust
+allKlfcombNCAdj<- allKlfcombNCSupsClass%>%
+  filter(!class=="ee")%>%
+  mutate(adjBoostmed=boost_all+0.43)%>%
+  mutate(adjBoostmedEP=boost_all+0.28)%>%
+  mutate(adjBoostmean=boost_all+0.40)
+#adjust by med EP per promoter
+BasalMedianUP<-allKlfcombNCSupsClass %>%
+  filter(class=="EP")%>%
+  mutate(id2=paste0(frag2,strand2))%>%
+  group_by(id2)%>%
+  summarise(Basal_median=median(activity_all), Nbasal=n())
+
+allKlfcombNCAdj_all<-left_join(allKlfcombNCAdj%>% mutate(id2=paste0(frag2,strand2)),BasalMedianUP, by="id2")%>%
+  mutate(BoostPerPmed=log2(activity_all/Basal_median))
+
+```
+
+```{r, fig.height=10,fig.width=10}
+allKlfcombNCAdj%>%
+  ggplot(aes(class,adjBoostmed))+
+  geom_violin(aes(fill=class))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 1.General NP effect")+
+  theme_bw(base_size = 15)
+```
+
+```{r, fig.height=7,fig.width=15}
+allKlfcombNCAdj_all %>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,adjBoostmedEP))+
+  geom_violin(aes(fill=))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 3. General EP effect. ")+
+  theme_bw(base_size = 12)
+```
+
+```{r, fig.height=7,fig.width=15}
+allKlfcombNCAdj_all%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,BoostPerPmed))+
+  geom_violin(aes(fill=))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 4. Per P EP effect. EPs")+
+  theme_bw(base_size = 12)
+```
+
+```{r, fig.height=7,fig.width=15}
+allKlfcombNCAdj_all%>%
+  filter(class%in%c("NP"))%>%
+  ggplot(aes(id2,BoostPerPmed))+
+  geom_violin(aes(fill=))+
+  geom_boxplot()+
+  ggtitle("Upstream assay Adjusted boosting indexes, 4. Per P EP effect. NPs ")+
+  theme_bw(base_size = 12)
+```
+## Downstream
+```{r}
+#calculate general NP boost deviation 
+tib_Split_NCS_avgSPLIT_V2%>%
+  mutate(Set=ifelse(str_sub(library,1,1)=="N", "NCS", "Split"))%>%
+  mutate(class= ifelse(Set=="Split",class,ifelse(Set=="NCS"&class=="PP","PP", "NP")))%>%
+  filter(!boost%in%c(Inf,-Inf, NA))%>%
+  group_by(class)%>%
+  summarise(median(boost), mean(boost))
+
+#calculate median NP boost deviation per promoter
+tib_Split_NCS_avgSPLIT_V2%>%
+  mutate(Set=ifelse(str_sub(library,1,1)=="N", "NCS", "Split"))%>%
+  mutate(class= ifelse(Set=="Split",class,ifelse(Set=="NCS"&class=="PP","PP", "NP")))%>%
+  filter(!boost%in%c(Inf,-Inf, NA))%>%
+  filter(class=="NP")%>%
+  group_by(frag2)%>%
+  summarise(median(boost), mean(boost), n())
+
+tib_Split_NCS_avgSPLIT_V2Adj<- tib_Split_NCS_avgSPLIT_V2%>%
+  mutate(Set=ifelse(str_sub(library,1,1)=="N", "NCS", "Split"))%>%
+  mutate(class= ifelse(Set=="Split",class,ifelse(Set=="NCS"&class=="PP","PP", "NP")))%>%
+  mutate(adjBoostmed=boost+0.54)%>%
+  mutate(adjBoostmedEP=boost+0.24)%>%
+  mutate(adjBoostP=ifelse(
+    frag2=="NoP", boost+0.84,ifelse(
+      frag2=="P001", boost+1.11,ifelse(
+             frag2=="P009", boost+0.93,ifelse(
+               frag2=="P013", boost+0.46,ifelse(
+                 frag2=="P014", boost+0.13,ifelse(
+                   frag2=="P016", boost+0.51,ifelse(
+                     frag2=="P017", boost+0.21,ifelse(
+                       frag2=="P018", boost+0.62,ifelse(
+                         frag2=="P019", boost+0.38,ifelse(
+                           frag2=="P021", boost+0.87, boost+0.73
+                           #last condition if not is P022 adjustment
+                           )))))))))))
+### Adjust by median EP
+
+BasalMedianDown<-tib_Split_NCS_avgSPLIT_V2 %>%
+  filter(class%in%c("EP", "EN"))%>%
+  group_by(id2)%>%
+  summarise(Basal_median=median(activity_all), Nbasal=n())
+
+tib_Split_NCS_avgSPLIT_V2Adj_all<-left_join(tib_Split_NCS_avgSPLIT_V2Adj,BasalMedianDown, by="id2")%>%
+  mutate(BoostPerPmed=log2(activity_all/Basal_median))
+
+
+```
+```{r, fig.height=10,fig.width=10}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  ggplot(aes(class,adjBoostmed))+
+  geom_violin(aes(fill=class))+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes, 1. General effect median NP")+
+  theme_bw(base_size = 15)
+```
+
+```{r, fig.height=10,fig.width=10}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  ggplot(aes(class,adjBoostP))+
+  geom_violin(aes(fill=class))+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes, 2. Per P effect NP")+
+  theme_bw(base_size = 15)
+```
+```{r, fig.height=10,fig.width=10}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class=="EP")%>%
+  ggplot(aes(id2,adjBoostP))+
+  geom_violin()+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes, 2. Per P effect NP")+
+  theme_bw(base_size = 15)
+```
+
+
+```{r, fig.height=10,fig.width=10}
+tib_Split_NCS_avgSPLIT_V2Adj%>%
+  ggplot(aes(class,adjBoostmedEP))+
+  geom_violin(aes(fill=class))+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes EP, 3")+
+  theme_bw(base_size = 15)
+```
+
+```{r, fig.height=10,fig.width=10}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class=="EP")%>%
+  ggplot(aes(id2,adjBoostmedEP))+
+  geom_violin()+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes, 3. General EP effect")+
+  theme_bw(base_size = 15)
+```
+
+
+```{r, fig.height=7,fig.width=15}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class%in%c("EP"))%>%
+  ggplot(aes(id2,BoostPerPmed))+
+  geom_violin(aes(fill=))+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes,4. Per P EP effect.")+
+  theme_bw(base_size = 12)
+```
+
+```{r, fig.height=7,fig.width=7}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class%in%c("EP", "NP", "PP"))%>%
+  ggplot(aes(class,BoostPerPmed))+
+  geom_violin(aes(fill=class))+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes,4. Per P EP effect.")+
+  theme_bw(base_size = 12)
+```
+```{r, fig.height=7,fig.width=7}
+tib_Split_NCS_avgSPLIT_V2Adj_all%>%
+  filter(class%in%c("EP"))%>%
+  dplyr::rename(Adjusted=BoostPerPmed,Original=boost)%>%
+  gather(Adjustment, Boost, c(Adjusted,Original))%>%
+  ggplot(aes(Adjustment,Boost))+
+  geom_violin(aes(fill=Adjustment))+
+  geom_boxplot()+
+  ggtitle("Downstream assay Adjusted boosting indexes")+
+  theme_bw(base_size = 15)
+```
+
+
+#Compare adjustments between assays
+```{r}
+UpDownAdjmerged<-inner_join(allKlfcombNCAdj,tib_Split_NCS_avgSPLIT_V2Adj, by="id")
+UpDownAdjmerged_all<-inner_join(allKlfcombNCAdj_all,tib_Split_NCS_avgSPLIT_V2Adj_all, by="id")
+```
+
+## Unadjusted
+```{r, fig.height=10,fig.width=6}
+UpDownAdjmerged_all%>%
+  ggplot(aes(boost_all,boost))+
+  geom_point(size=0.8, alpha=0.8)+
+  stat_cor()+
+  coord_fixed()+
+    geom_density_2d(alpha=0.5)+
+  geom_hline(yintercept = 0)+
+    geom_vline(xintercept = 0)+
+  facet_grid(class.x~.)+
+  xlab("Boost Upstream")+
+  ylab("Boost Downstream")+
+  theme_bw(base_size = 15)+
+  geom_smooth(method = "lm")+
+  ggtitle("unadjusted boosting indexes comparison")
+```
+This is the baseline comparison. There is a decent correlation between EP pairs (R=0.47 pearson), but the center of the cloud is in the negative region, a bit more negative in the Upstream assay than in the Downstream Assay. Therefore, it is difficult what is boosting or not boosting in both assays.
+
+## 1. General effect Negative Controls.
+
+```{r, fig.height=10,fig.width=6}
+UpDownAdjmerged%>%
+  ggplot(aes(adjBoostmed.x,adjBoostmed.y))+
+  geom_point(size=0.8, alpha=0.8)+
+  stat_cor()+
+  geom_density_2d(alpha=0.5)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  facet_grid(class.x~.)+
+  xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  theme_bw(base_size = 15)+
+  geom_smooth(method = "lm")+
+  ggtitle("Adj Boost Up vs Down, 1. General effect NP. ")
+```
+
+The correlation between EP pairs remains the same (R=0.47 pearson), because we are just shifting the distributions. However, the center of the cloud is still not centered, Being more positive in the Downstream than in the Upstream assay. The difference seems to come from the fact that Negative controls have different baground effects in each assay. It is still difficult what is boosting or not boosting in both assays.
+
+## 2. Per Promoter NP effect.
+
+This normlisation is only possible for the Downstream assay as not all of the promoters have enough NP combinations is the Upstream assay. Therefore, we compare this normalisation in the downstream assay to the 1st normalistion in the Upstream assay.
+
+```{r, fig.height=10,fig.width=6}
+UpDownAdjmerged%>%
+  ggplot(aes(adjBoostmed.x,adjBoostP))+
+  geom_point(size=0.8, alpha=0.8)+
+  stat_cor()+
+  geom_density_2d(alpha=0.5)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  facet_grid(class.x~.)+
+  xlab("Boost Adj Upstream (NP)")+
+  ylab("Boost Adj Downstream(NP per P)")+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  theme_bw(base_size = 15)+
+  geom_smooth(method = "lm")+
+  ggtitle("Adj Boost Upstream vs Downstream, 2. Per P effect NP. ")
+```
+
+The correlation between assays decreases. It is not a good idea to use different normalisations for each assay if we aim to compare the assays.
+
+## 3. General effect Enhancers.
+```{r, fig.height=10,fig.width=6}
+UpDownAdjmerged%>%
+  ggplot(aes(adjBoostmedEP.x,adjBoostmedEP.y))+
+  geom_point(size=0.8, alpha=0.8)+
+  stat_cor()+
+  geom_density_2d(alpha=0.5)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  facet_grid(class.x~.)+
+  xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  theme_bw(base_size = 15)+
+  geom_smooth(method = "lm")+
+  ggtitle("Adj Boost Upstream vs Downstream, 3. General effect EP. ")
+```
+Again, the correlation between EP pairs remains the same (R=0.47 pearson), because we are just shifting the distributions. In this case, however, the distributions are almost centered around the 0
+
+## 4. General effect Enhancers.
+```{r, fig.height=10,fig.width=6}
+UpDownAdjmerged_all%>%
+  ggplot(aes(BoostPerPmed.x,BoostPerPmed.y))+
+  geom_point(size=0.8, alpha=0.8)+
+  stat_cor()+
+  geom_density_2d(alpha=1)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  facet_grid(class.x~.)+
+  xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  theme_bw(base_size = 15)+
+  geom_smooth(method = "lm")+
+  ggtitle("Adj Boost Upstream vs Downstream, 4. Per P effect EP. ")
+```
+```{r, fig.height=10,fig.width=10}
+UpDownAdjmerged_all%>%
+  filter(class.x=="EP")%>%
+  ggplot(aes(BoostPerPmed.x,BoostPerPmed.y))+
+  geom_point(size=0.8, alpha=0.8)+
+  stat_cor()+
+  #geom_density_2d(alpha=1)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  #facet_grid(class.x~.)+
+  xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  theme_bw(base_size = 25)+
+  geom_smooth(method = "lm")+
+  #ggtitle("Boost Upstream vs Downstream")+
+  xlim(c(-3,3))+
+  ylim(c(-3,3))
+```
+
+```{r, fig.height=10,fig.width=10}
+UpDownAdjmerged_all%>%
+  filter(class.x=="EP")%>%
+  filter(frag1.x=="E061")%>%
+  ggplot(aes(BoostPerPmed.x,BoostPerPmed.y))+
+  geom_point(size=0.8, alpha=0.8)+
+  stat_cor()+
+  #geom_density_2d(alpha=1)+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  #facet_grid(class.x~.)+
+  xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  theme_bw(base_size = 25)+
+  geom_smooth(method = "lm")+
+  #ggtitle("Boost Upstream vs Downstream")+
+  xlim(c(-3,3))+
+  ylim(c(-3,3))
+```
+
+Surprisingly, the correlation between EP pairs remains the same (R=0.47 pearson). It is surprising because now we are doing different rescaling normalisations per P in each assay, so you could expect noise to decrease the corrlations. The distributions are almost centered around the 0 and it seems to be a narrower distribution
+
+## Average comparisons.
+
+We can calculate the mean boosting index for each enhancer across all promters. Then, the same as we just did we can compare the different normalisations between the two assays.
+```{r, fig.height=10,fig.width=10}
+UpDownAdjmerged%>%
+  filter(!boost_all%in%c(NA,Inf,-Inf))%>%
+  filter(!boost%in%c(NA,Inf,-Inf))%>%
+  filter(class.x==c("EP"))%>%
+  group_by(frag1.x)%>%
+  summarise(meanboostUP=mean(boost_all),meanboostDown=mean(boost))%>%
+  ggplot(aes(meanboostUP,meanboostDown))+
+  geom_point()+
+  stat_cor()+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+    geom_vline(xintercept = 0)+
+  #facet_wrap(~class.x)+ 
+  xlab("Boost Upstream")+
+  ylab("Boost Downstream")+
+  theme_bw(base_size = 15)+
+  geom_smooth(method = "lm")+
+  ggtitle("Average boost per Enhancer Up vs Down")
+```
+```{r, fig.height=10,fig.width=10}
+UpDownAdjmerged_all%>%
+  filter(!boost_all%in%c(NA,Inf,-Inf))%>%
+  filter(!boost%in%c(NA,Inf,-Inf))%>%
+  filter(class.x==c("EP"))%>%
+  group_by(frag1.x)%>%
+  summarise(meanboostUP=mean(adjBoostmed.x),meanboostDown=mean(adjBoostmed.y))%>%
+  ggplot(aes(meanboostUP,meanboostDown))+
+  geom_point()+
+  stat_cor()+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+    geom_vline(xintercept = 0)+
+  #facet_wrap(~class.x)+
+  theme_bw(base_size = 15)+
+   xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  geom_smooth(method = "lm")+
+  ggtitle("Average boost per Enhancer Up vs Down, 1. General effect NP.")
+```
+
+```{r, fig.height=10,fig.width=10}
+UpDownAdjmerged_all%>%
+  filter(!boost_all%in%c(NA,Inf,-Inf))%>%
+  filter(!boost%in%c(NA,Inf,-Inf))%>%
+  filter(class.x==c("EP"))%>%
+  group_by(frag1.x)%>%
+  summarise(meanboostUP=mean(adjBoostmed.x),meanboostDown=mean(adjBoostP))%>%
+  ggplot(aes(meanboostUP,meanboostDown))+
+  geom_point()+
+  stat_cor()+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+    geom_vline(xintercept = 0)+
+  #facet_wrap(~class.x)+
+  theme_bw(base_size = 15)+
+   xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  geom_smooth(method = "lm")+
+  ggtitle("Average boost per Enhancer Up vs Down, 2. Per P effect NP.")
+```
+
+```{r, fig.height=10,fig.width=10}
+UpDownAdjmerged_all%>%
+  filter(!boost_all%in%c(NA,Inf,-Inf))%>%
+  filter(!boost%in%c(NA,Inf,-Inf))%>%
+  filter(class.x==c("EP"))%>%
+  group_by(frag1.x)%>%
+  summarise(meanboostUP=mean(adjBoostmedEP.x),meanboostDown=mean(adjBoostmedEP.y))%>%
+  ggplot(aes(meanboostUP,meanboostDown))+
+  geom_point()+
+  stat_cor()+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+    geom_vline(xintercept = 0)+
+  #facet_wrap(~class.x)+
+  theme_bw(base_size = 15)+
+   xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  geom_smooth(method = "lm")+
+  ggtitle("Average boost per Enhancer Up vs Down, 3. General effect EP.")
+```
+
+```{r, fig.height=10,fig.width=10}
+UpDownAdjmerged_all%>%
+  filter(!boost_all%in%c(NA,Inf,-Inf))%>%
+  filter(!boost%in%c(NA,Inf,-Inf))%>%
+  filter(class.x==c("EP"))%>%
+  group_by(frag1.x)%>%
+  summarise(meanboostUP=mean(BoostPerPmed.x),meanboostDown=mean(BoostPerPmed.y))%>%
+  ggplot(aes(meanboostUP,meanboostDown))+
+  geom_point()+
+  stat_cor()+
+  coord_fixed()+
+  geom_hline(yintercept = 0)+
+    geom_vline(xintercept = 0)+
+  #facet_wrap(~class.x)+
+  theme_bw(base_size = 15)+
+   xlab("Boost Adj Upstream")+
+  ylab("Boost Adj Downstream")+
+  geom_smooth(method = "lm")+
+  ggtitle("Average boost per Enhancer Up vs Down, 4. Per P effect EP.")
+```
+
+The same trends observed at the individual level are conserved when we calculate the average boosting index per enhancer.
+
+# Normalisations Conclusions
+Normalisations 3 and 4 using the EP pairs as a reference work best. They allow to quantitatively compare boosting indexes between assays.
+
+# Save rescaled data
+```{r}
+
+save(list = c('tib_Split_NCS_avgSPLIT_V2Adj_all', 'allKlfcombNCAdj_all'),
+     file = '~/mydata/GitHub/EPCombinations/data/MMA20201204_NormAssays_Clusters.RData')
+```

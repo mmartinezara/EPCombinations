@@ -1,0 +1,437 @@
+---
+title: "MMA20201010_Tfcp2l1_Raw_to_Processed_V3pipeline_V4Norm"
+author: "MMA"
+date: "10/11/2020"
+output:
+  html_document:
+    theme: journal #cerulean
+    highlight: monochrome
+    toc: true
+    toc_float: true
+    code_folding: show
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo       = TRUE, 
+                      message    = FALSE, 
+                      warning    = FALSE, 
+                      cache      = TRUE,
+                      autodep    = TRUE,
+                      fig.align  = 'center', 
+                      fig.width  = 6, 
+                      fig.height = 6)
+```
+
+```{r libs and fun}
+library(tidyverse)
+library(here)
+library(magrittr)
+library(reshape2)
+library(knitr)
+library(gridExtra)
+library(pander)
+library(cowplot)
+library(circlize)
+library(datteRo)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+
+```
+
+---
+# Intro
+This is an update on `MMA190301_epsure_mesc_dat_Tfcp2l1_raw_to_coop_dattero.Rmd`. Data preprocessing has been updated to V3 epsure_pipeline, for both ecn and iPCR data. Here we update the data postprocessing to V4.
+
+## Setup
+
+8 cDNA and 2 pDNA samples were generated using EP014 (Tfcp2l1 Basal) and EP015 (Tfcp2l1 Combinatorial) libraries. The pDNA samples come from the libraries mix that was used to generate all the cDNA samples. 3 cDNA samples correspond to biological replicates in the 2i+lif culturing conditions and 5 correspond to biological replicates generated in the 2i-lif(Ml or minus_lif) culturing conditions. 3 of these 5 ssamples are biological replicates collected 24 hours after transfection as in the +lif condition. The other 2 samples are the same 2nd and 3rd replicates but collected 48hours after transfection.
+
+
+**Notes**: for details on iPCR data analysis, see `MMA181130_epsure_mesc_dat_Tfcp2l1_raw_to_coop_dattero.Rmd`. iPCR data for the Tfcp2l1 libraries were analyzed using the ```ipcr.wf``` workflow of the EP-SuRE Snakemake pipeline v3 (see GitLab).
+
+```{sh, eval = FALSE}
+snakemake --cores 24 --use-conda --snakefile ~/mydata/GitLab/epmatrix/epsure_pipeline/v2/workflows/ecn.wf --configfile ~/mydata/GitLab/epmatrix/epsure_pipeline/v3/config/MMA20200629_ecn.yaml
+```
+
+Please refer to the same file for details on ECN (expression and copy number) data analysis.
+
+
+## iPCR - Processing
+
+### Basal library
+
+```{r process basal lib}
+# load basal library
+tib_basal <- read_ipcr('/DATA/projects/epmatrix/mouse/DAT_EP014_EP015/ipcr/Results_v3/ipcr_E43_EP014_dat_tfcp2l1_basal_miseq_br1_unique_barcodes_frag_id_merged.tsv')
+##Warning, this path is for my direct link to the shared folder, I could not make it work otherwise
+# remove heterotypic
+
+#store unfiltered version
+tib_basal_unf<-tib_basal
+#remove heterotypic combinations
+tib_basal <- remove_heterotypic(tib_basal)
+
+# fragment representation
+count_fragments(tib_basal)
+count_elements(tib_basal)
+count_bc_reads(tib_basal)
+```
+
+```{r plot barcode count distribution, fig.width = 8, fig.height = 8}
+plot_bc_distribution(tib_basal, type = 'basal')
+```
+
+```{r test orientation bias, fig.width = 4, fig.height = 4}
+#plot_orientation_bias(tib_basal)
+```
+
+### Combinatorial library
+
+```{r process comb lib}
+# load combinatorial library
+tib_comb <- read_ipcr('/DATA/projects/epmatrix/mouse/DAT_EP014_EP015/ipcr/Results_v3/ipcr_E43_EP015_dat_tfcp2l1_combinatorial_miseq_br1_combined_unique_barcodes_frag_id_merged.tsv')
+#store unfiltered version
+tib_comb_unf<-tib_comb
+# count combinations
+count_combinations(tib_comb, tib_basal)
+
+#put appart empty fragments
+tib_comb_empty<-tib_comb%>% filter(frag1=="eempty")
+
+# mark and remove basal fragments from comb library. NOTE: It also removes empty fragments, that is why we put them appart before and bring them back afterwards.
+tib_comb_het <- mark_basal(tib_comb) %>%
+  filter(!with_basal)
+
+# bring back empty elements
+tib_comb_hetempty<-bind_rows(tib_comb_het,tib_comb_empty)
+
+```
+
+```{r comb lib - enhancer promoter representation, fig.width = 8, fig.height = 8}
+tib_tmp <- count_combination_type(tib_comb_hetempty)
+plot_combination_type(tib_tmp)
+
+# summarize by combinations
+#tib_comb_smrzd <- summarize_combinations(tib_comb)
+#plot_bc_distribution(tib_comb_smrzd, type = 'comb')
+```
+
+```{r coop lib - identify hits with most combinations}
+get_most_represented(tib_comb_hetempty)
+get_most_represented(tib_comb_hetempty, prom_only = TRUE)
+```
+
+
+### Visualizing combinations
+
+#### Binary matrix
+
+```{r comb lib - heatmap represented comb, fig.width = 8, fig.height = 8}
+# binary representation of fragment combinations (undirectional)
+plot_ipcr_matrix(tib_comb_hetempty, type = 'binary', lab_frac = 0.5)
+```
+
+```{r comb lib - heatmap orient, fig.width = 10, fig.height = 8.5}
+# number of orientations per combination
+plot_ipcr_matrix(tib_comb_hetempty, type = 'orientations', lab_frac = 0.5)
+
+# number of barcodes per combination
+plot_ipcr_matrix(tib_comb_hetempty, type = 'barcodes', lab_frac = 0.5)
+```
+
+
+### get list of unique barcodes
+```{r}
+#merge all to check proper barcode clashing
+all_ipcr_merged<-bind_rows(tib_basal_unf,tib_comb_unf)
+# get unique barcodes before filtering
+all_ipcr_merged_unique<-all_ipcr_merged %>%
+  ungroup()%>%
+  nest(-barcode ) %>% 
+  mutate(n = map_dbl(data, nrow))%>%
+  filter(n==1)%>%
+  unnest()%>% 
+  select(-n)
+```
+
+## Combining expression and copy number data
+
+pDNA counts (copy number) are common for all of the experiments (p1+p2).
+There are 3 cDNA biological replicates for +lif and -lif, and 2 biological replicates for -lif 48hours which are connected to 2 of the bilogical replicates of the -lif condition.
+ 
+
+```{r batch2 merge ipcr and ecn data}
+# read expression data (cdna)
+tib_expr_br1 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP014_EP015/ecn/Results/cdna_E56_dat_br1_barcode_counts.tsv', col_lab = 'cdna_counts_br1')
+tib_expr_br2 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP014_EP015/ecn/Results/cdna_E56_dat_br2_barcode_counts.tsv', col_lab = 'cdna_counts_br2')
+tib_expr_br3 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP014_EP015/ecn/Results/cdna_E56_dat_br3_barcode_counts.tsv', col_lab = 'cdna_counts_br3')
+
+# read copy number data (pdna)
+tib_cn_br1 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP014_EP015/ecn/Results/pdna_E56_dat_br1_barcode_counts.tsv', col_lab = 'pdna_counts_br1')
+tib_cn_br2 <- read_ecn('/DATA/projects/epmatrix/mouse/DAT_EP014_EP015/ecn/Results/pdna_E56_dat_br2_barcode_counts.tsv', col_lab = 'pdna_counts_br2')
+
+# merge datasets
+tib_basal_merged <- merge_ipcr_ecn(tib           = tib_basal, 
+                                      cn_tib_list   = list(tib_cn_br1, tib_cn_br2),
+                                      expr_tib_list = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+tib_comb_merged <- merge_ipcr_ecn(tib           = tib_comb_hetempty, 
+                                     cn_tib_list   = list(tib_cn_br1, tib_cn_br2),
+                                     expr_tib_list = list(tib_expr_br1, tib_expr_br2, tib_expr_br3))
+
+get_barcode_summary(tib_basal, tib_comb, tib_basal_merged, tib_comb_merged)
+
+
+```
+
+```{r}
+tib_comb_merged%>%
+  filter(frag1=="eempty")
+```
+
+
+### Merging Comb and basal datasets, filter uniquely assigned barcodes
+```{r}
+#Plus lif samples
+tib_basal_merged_idlib<-tib_basal_merged %>% 
+  mutate(id=paste0(id, "_basal"))
+
+tib_comb_merged_idlib<-tib_comb_merged %>% 
+  mutate(id=paste0(id, "_comb"))
+
+
+# v3_b1_v4 stands for v3 EP-sure pipeline, batch 1 expression data generation (only one batch for Tfcp2l1), v4 data normalisation.
+
+tib_all_PlusLif_v3_b1_v4<-bind_rows(tib_basal_merged_idlib,tib_comb_merged_idlib)
+
+#new barcode clashing removal
+# This step is now crucial because there is no barcode clashing removal in the pipeline
+#tib_all_NCklf2nanog_v3_b3_v4_unique <- tib_all_NCklf2nanog_v3_b3_v4 %>% ungroup()%>%
+#  nest(-barcode ) %>% 
+#  mutate(n = map_dbl(data, nrow))%>%
+#  filter(n==1)%>%
+#  unnest()%>% 
+#  select(-n)
+
+# Barcode clashing is done before datasets polishing in parallel, and then applied here
+tib_all_PlusLif_v3_b1_v4_unique<-tib_all_PlusLif_v3_b1_v4%>%
+  filter(barcode %in% all_ipcr_merged$barcode)
+
+```
+
+# Processing v4
+
+```{r}
+# offsets are computed after combining pDNA counts, from pDNA count columns, after filtering
+auto_process_v4 <- function(tib_all, min_pdna, min_n_bc, avg_type) {
+
+  # sum pdna counts across replicates
+   tib_all    <- combine_cn(tib_all)
+
+  # remove barcodes with pDNA reads < threshold
+  tib_all    <- filter_cn(tib_all, min_pdna = min_pdna)
+
+
+  # remove barcodes of elements with < threshold distinct barcodes
+  tib_all    <- filter_barcodes(tib_all, min_n_bc = min_n_bc,  main = 'AllBC')
+
+  # compute offsets
+  offsets_all <- tib_all %>%
+    dplyr::select(contains('dna_counts')) %>%
+    colSums() / 1e6
+  names(offsets_all) <- names(offsets_all) %>%
+    str_replace('_counts', '')
+  
+  message('norm factors', offsets_all)
+  
+    
+  # normalize to library sizes
+  tib_all    <- normalize_counts(tib_all, offsets_all)
+
+  # compute activities and summarize barcodes
+  tib_all    <- compute_activities(tib_all)
+
+  # summarize activities (weighted average)
+  tib_all    <- summarize_barcodes(tib_all, type = avg_type)
+
+#  if(missing(signal_t)) {
+
+    # model combinatorial activity distributions
+ #   signal_t     <- learn_min_activity(tib_comb)
+
+ # }
+
+ # # compute cooperativity
+#  tib_comb_all <- compute_cooperativity(tib_comb, tib_basal, signal_t = signal_t, remove_inactive = FALSE)
+ # tib_comb     <- compute_cooperativity(tib_comb, tib_basal, signal_t = signal_t, remove_inactive = TRUE)
+
+  # add metadata
+ # tib_basal    <- add_metadata(tib_basal, tib_dat = tib_dat, type = 'basal')
+#  tib_comb     <- add_metadata(tib_comb, tib_dat = tib_dat, type = 'comb')
+ # tib_comb_all <- add_metadata(tib_comb_all, tib_dat = tib_dat, type = 'comb')
+
+  # return list of tibs
+  return(tib_all)
+
+}
+```
+
+
+```{r set params}
+# min number of barcodes
+min_n_bc <- 5
+# min copy number
+min_pdna <- 8
+
+
+# load genomic coordinates of DAT library
+tib_frag_coord <- read_dat_design('/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/designs/fc180419_dat_tfcp2l1.bed')
+```
+
+```{r autoprocess tibs}
+
+# change from previous versions, now we process first barcode aggregation and activities computations, in a later step we calculate boosting.
+tibs_tfcp2l1_v3_b1_v4        <- auto_process_v4( tib_all_PlusLif_v3_b1_v4_unique, 
+                               min_pdna  = min_pdna, 
+                               min_n_bc  = min_n_bc, 
+                               avg_type  = 'avg')
+
+
+```
+
+
+## Postprocessing
+### Separate libraries
+```{r}
+#split id from library identity
+tibs_tfcp2l1_v3_b1_v4_idsplit <- tibs_tfcp2l1_v3_b1_v4 %>% 
+  mutate(library=sapply(str_split(id, "_"), function(x) x[2])) %>% 
+  mutate(id= sapply(str_split(id, "_"), function(x) x[1]))
+
+## separate librariesib_basal_merged_idlib<-tib_basal_merged %>% 
+
+tib_basal_tfcp2l1_v3_b1_v4 <- tibs_tfcp2l1_v3_b1_v4_idsplit %>% filter(library == "basal")
+
+tib_comb_tfcp2l1_v3_b1_v4 <- tibs_tfcp2l1_v3_b1_v4_idsplit %>% filter(library == "comb")
+
+
+```
+
+### Compute Coop V4 standard
+
+### Compute Coop V4 Empty
+```{r}
+compute_cooperativity_v4 <- function(tib_comb, tib_basal) {
+
+ 
+  # generate key pair to extract basal activities of frag1/frag2
+  tib_basal_act <- tib_comb %>%
+    # add temp ids matching basal library id for each element of pair
+    mutate(id_frag1 = paste0(frag1, strand1, frag1, strand1),
+           id_frag2 = paste0(frag2, strand2, frag2, strand2)) %>%
+    dplyr::select(id_frag1, id_frag2) %>%
+    # extract activities basal frag 1
+    left_join(dplyr::select(tib_basal, id, starts_with('activity')),
+              by = c("id_frag1" = "id")) %>%
+    # extract activities basal frag 2
+    left_join(dplyr::select(tib_basal, id, starts_with('activity')),
+              by = c("id_frag2" = "id"),
+              suffix = c('_frag1', '_frag2')) %>%
+    dplyr::select(-c(id_frag1, id_frag2))
+
+  # add basal activities to comb
+  tib_activities <- bind_cols(tib_comb, tib_basal_act)%>%
+    mutate(boost=log2(activity_all/activity_all_frag2))%>%
+    #mutate(coop_all=log2(activity_all/(activity_all_frag2+activity_all_frag1)))%>%
+    dplyr::select(starts_with('activity'), boost)
+
+  tib_comb <- bind_cols(tib_comb, tib_activities%>%select(-ends_with(c("br1","br2","br3","all"))))
+  tib_comb
+}
+
+```
+
+
+```{r}
+tib_comb_tfcp2l_processed_v4B1<-compute_cooperativity_v4(tib_comb_tfcp2l1_v3_b1_v4,tib_basal_tfcp2l1_v3_b1_v4)
+
+```
+
+```{r}
+tib_comb_tfcp2l_processed_v4B1%>% filter(frag1=="eempty")
+```
+
+```{r}
+tib_comb_tfcp2l_processed_v4B1%>% 
+  ggplot(aes(log2(activity_all_frag2),log2(activity_all)))+
+          # geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.03, size=0.1, width = 0.2)+
+  geom_point(alpha=0.5)+
+    theme_bw()+
+  ggtitle("B3 V4 basal vs comb activity Tfcp2l1")+
+  geom_abline(slope = 1, colour="red")
+```
+
+
+## Add metadata
+```{r}
+#function
+add_metadata <- function(tib, tib_dat) {
+tib <- tib %>%
+      mutate(id1   = paste0(frag1, strand1),
+             id2   = paste0(frag2, strand2),
+             id    = paste0(id1, id2),
+             class = paste0(substr(id1, 1, 1), substr(id2, 1, 1))) %>%
+      # add genomic coordinates
+      left_join(tib_dat, by = c('frag1' = 'frag')) %>%
+      dplyr::rename(seqnames1 = seqnames, start1 = start, end1 = end) %>%
+      left_join(tib_dat, by = c('frag2' = 'frag')) %>%
+      dplyr::rename(seqnames2 = seqnames, start2 = start, end2 = end) %>%
+      # group, trick essentially rowwise()
+      group_by(id1, id2) %>%
+      # distances for trans pairs is set to Inf
+      mutate(dist = ifelse(seqnames1 == seqnames2,
+                           min(abs(end1 - start2), abs(end2 - start1)), Inf)) %>%
+      # reorder to final shape
+      dplyr::select(id, class,
+                    id1, frag1, strand1, seqnames1, start1, end1,
+                    id2, frag2, strand2, seqnames2, start2, end2,
+                    dist, starts_with('activ'), starts_with('boost'), starts_with('coop')) %>%
+      ungroup
+
+tib}
+```
+
+```{r}
+#add metadata to each of the datasets
+tib_comb_tfcp2l_processed_v4B1<-add_metadata(tib_comb_tfcp2l_processed_v4B1, tib_frag_coord)
+```
+
+```{r}
+tib_comb_tfcp2l_processed_v4B1%>% 
+  ggplot(aes(class,boost))+
+          # geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 0.03, size=0.1, width = 0.2)+
+  geom_violin(alpha=0.5, aes(fill=class))+
+  geom_boxplot(width=0.3)+
+    theme_bw()+
+  ggtitle("B3 V4 basal vs comb activity Tfcp2l1")
+
+```
+
+# Save dataset
+
+```{r save tibbles, eval = TRUE}
+save(list = c('tib_comb_tfcp2l_processed_v4B1', 'tib_comb_tfcp2l_processed_v4B1_ML24','tib_comb_tfcp2l_processed_v4B1_ML48'),
+     file = '~/mydata/GitHub/EPCombinations/data/MMA20201010_epsure_tibs_tfcp2l1_V3_V4.RData')
+```
+
+
+
+
+### SessionInfo
+
+```{r}
+devtools::session_info()
+```
