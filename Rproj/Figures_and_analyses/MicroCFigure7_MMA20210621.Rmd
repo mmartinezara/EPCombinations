@@ -124,6 +124,10 @@ all_comball<-bind_rows(tfcp2l1_comball,Klf2_comball,Nanog_comball)
 ```
 
 # Data loading MicroC
+
+**NOTE**
+MicroC data is not provided in this GitHub repository as it is too heavy. This has to be downloaded from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE130275
+
 ```{r}
 # .hic data can be loaded using strawr::straw which allows to load only the region you are interested in. You have to load each normalisation separatedly.
 ##Load microC data .hic Klf2 locus
@@ -147,6 +151,7 @@ head(MicroCMatrixKlf2LocusKR)
 ## Load obs/exp transformed microC data from .cool files
 #Load mcool file. method taken from cooler2bedpe function in HiCcompare
 ####Klf2 locus
+##In order to generate this file with only 1 chromosem I used the function hicConvertFormat from HiExplorer
 Klf2dump <- rhdf5::h5dump("~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_1.3B_obs_exp_chr8_z15.cool")
 # the set 17 is the highest resolution set. 0 is lowest resolution
 #set 15 s 400bp resoluion
@@ -157,6 +162,7 @@ matKlf2 <- data.frame(bin1 = Klf2dump$pixels$bin1_id, bin2 = Klf2dump$pixels$bin
   bedpeMicroC_Klf2_OE <- hicpro2bedpe(matKlf2, idsKlf2)
 
 ####Nanog locus
+  ##In order to generate this file with only 1 chromosem I used the function hicConvertFormat from HiExplorer
 Nanogdump <- rhdf5::h5dump("~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_1.3B_obs_exp_chr6_z15.cool")
 # the set 17 is the highest resolution set. 0 is lowest resolution
 #set 15 s 400bp resoluion
@@ -167,6 +173,7 @@ matNanog <- data.frame(bin1 = Nanogdump$pixels$bin1_id, bin2 = Nanogdump$pixels$
   bedpeMicroC_Nanog_OE <- hicpro2bedpe(matNanog, idsNanog)
 
 ####Tfcp2l1 locus
+  ##In order to generate this file with only 1 chromosem I used the function hicConvertFormat from HiExplorer
 Tfcp2l1dump <- rhdf5::h5dump("~/mydata/ExtData/MicroC/GSE130275_mESC_WT_combined_1.3B_obs_exp_chr1_z15.cool")
 # the set 17 is the highest resolution set. 0 is lowest resolution
 #set 15 s 400bp resoluion

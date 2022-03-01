@@ -42,6 +42,7 @@ library(datteRo)
 # Load data
 
 ```{r}
+#Data is not provided in Github repository, it has to be downloaded from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE184426 and supplementary table from https://www.biorxiv.org/content/10.1101/2021.10.23.462170v1
 ExP_counts<-read_tsv('/YOURDIR/EPCombinations/data/BergmanEtAl/ExP_residual_per_BC.txt', col_names = TRUE)
 Eseqs<-read_tsv('/YOURDIR/EPCombinations/data/BergmanEtAl/EnhancerSequencesExP.txt', col_names = TRUE)
 ```

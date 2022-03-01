@@ -45,6 +45,47 @@ library(ggpubr)
 
 This document is intended to update the TF screen with the latest datasets in order to make publication grade figures.
 
+### Motif composition and scoring
+
+To determine the TF composition of each regulatory element in our basal library, we scored TF motifs from a collection of 2,448 curated mammalian PWMs using FIMO. The database was built on top of an earlier version ([Diaferia et al. 2016](https://www.ncbi.nlm.nih.gov/pubmed/26769127), which we previously used for our analyses) and was filtered to retain single PWM only.
+
+```{bash, eval = FALSE}
+tail -n +2 /home/f.comoglio/mydata/Annotations/TFDB/Curated_Natoli/update_2017/fc181127_curated_metadata_no_composite.csv | cut -f5 -d, | sort | uniq -c
+```
+
+The updated collection includes data from the following resources:
+
+- Badis G et al., Science 2009 (n=101)
+- Berger MF et al., Cell 2008 (n=163)
+- HOCOMOCO v10 (n=570)
+- JASPAR Core 2014 (n=231)
+- JASPAR Core 2016 (n=369)
+- Wei GH et al., EMBO 2010 (n=27)
+- Isakova A et al., Nat Methods. 2017 (n=65)
+- Jolma A and Taipale J et al., Cell 2013 (n=841)
+- Jolma A et al., Nature, 2015 (n=33)
+- Najafabadi et al., Nat Biotechnol 2015 (n=38)
+- Other (n=4)
+
+```{bash run fimo db2, eval = FALSE}
+
+## This is provided in EPCombinations/data/Curated_Natoli/update_2017/
+motfn=/home/f.comoglio/mydata/Annotations/TFDB/Curated_Natoli/update_2017/20170320_pwms_selected.meme
+odir=/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design
+
+query=/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/designs/sense_fasta_for_bt2/fc180419_dat_klf2_sense_ordered.fasta
+
+nice -n 19 fimo --no-qvalue --thresh 1e-4 --verbosity 1 --o $odir/fimo_klf2_db2/ $motfn $query &
+
+query=/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/designs/sense_fasta_for_bt2/fc180419_dat_nanog_sense_ordered.fasta
+
+nice -n 19 fimo --no-qvalue --thresh 1e-4 --verbosity 1 --o $odir/fimo_nanog_db2/ $motfn $query &
+
+query=/home/f.comoglio/gitlab/epmatrix/data/tad_deconstr_design/designs/sense_fasta_for_bt2/fc180419_dat_tfcp2l1_sense_ordered.fasta
+
+nice -n 19 fimo --no-qvalue --thresh 1e-4 --verbosity 1 --o $odir/fimo_tfcp2l1_db2/ $motfn $query &
+```
+
 
 # Load data
 ```{r}
