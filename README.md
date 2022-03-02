@@ -12,7 +12,7 @@ Structure:
 * DownstreamPipeline contains a snakemake pipeline used to preprocess Downstream assay sequencing data.
 * datteRo_1.2.1.tar.gz contains a custom R package developed by Federico Comoglio. The functions contained in this package are needed for processing of data in R scripts.
 * Rproj contains all R scripts used to process intermediate count tables to activities and boost indices, to perform analyses and to generate figures.
-* data contains processed activity and boost indices files, data needed for the design of cCRE-P libraries and external processed data needed for analyses.
+* data contains processed activity and boost indices files, data needed for the design of cCRE-P libraries and external processed data needed for analyses (Except MicroC data and data from Bergman et al., 2021)
 
 
 ## Snakemake pipelines
@@ -41,7 +41,21 @@ This package contains functions needed for the processing of data output from th
 
 ## Rproj - analyses
 
+Included in this folder:
+ 
+* Postprocessing scripts from cDNA and pDNA counts to activities.
+* Scripts to calculate (rescaled) boost indices for each of the datasets.
+* Figures_and_analyses folder contains all scripts used for analyses shown in the paper and its figures.
 
 
 ## data
+
+All processed data used for analyses is included here. In the folder 'Curated_Natoli' the updated TF motif database from Diaferia et al. (2016, 10.15252/embj.201592404) can be found. 'Housekeeping' contains the housekeeping classification of the promoters tested. 'tad_deconstr_desing' contains the TAD and DSH coordinates used to desing the libraries, as well as other external data used for analyses. This folder also includes the coordinates and sequences of the cCREs used for the libraries and their TF motif composition based on the TF motif database (fimo folders).
+
+MicroC data used for analysis is not provided as it is too heavy for this repository. This can be downloaded from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE130275. The data from Bergman et al., (2021) is available at https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE184426. 
+
+Intermediate files generated as output from the pipeline are not provided.
+
+
+
 
